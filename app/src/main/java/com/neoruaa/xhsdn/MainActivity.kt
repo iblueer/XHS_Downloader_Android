@@ -102,6 +102,7 @@ import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 import android.util.Size
+import androidx.activity.enableEdgeToEdge
 import java.io.File
 
 class MainActivity : ComponentActivity() {
@@ -109,6 +110,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             val controller = ThemeController(ColorSchemeMode.System)
@@ -286,7 +288,7 @@ private fun MainScreen(
                         imageVector = MiuixIcons.Useful.Settings,
                         contentDescription = "设置",
                         modifier = Modifier
-                            .padding(end = 16.dp)
+                            .padding(end = 26.dp)
 //                            .size(24.dp)
                             .clickable { onOpenSettings() }
                     )
@@ -393,6 +395,12 @@ private fun HomePage(
                     keyboardActions = KeyboardActions(onGo = { onDownload() })
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TextButton(
+                        text = "复制文案",
+                        onClick = onCopyText,
+                        modifier = Modifier.weight(1f),
+                        enabled = !uiState.isDownloading
+                    )
                     Button(
                         onClick = onDownload,
                         modifier = Modifier.weight(1f),
@@ -404,12 +412,6 @@ private fun HomePage(
                             color = Color.White
                         )
                     }
-                    TextButton(
-                        text = "复制文案",
-                        onClick = onCopyText,
-                        modifier = Modifier.weight(1f),
-                        enabled = !uiState.isDownloading
-                    )
                 }
                 if (uiState.showWebCrawl) {
                     Button(
