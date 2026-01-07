@@ -969,14 +969,14 @@ public class XHSDownloader {
      */
     private String extractNoteDescription(JSONObject note) {
         try {
-            if (note.has("desc")) {
-                return note.getString("desc");
-            } else if (note.has("description")) {
-                return note.getString("description");
-            } else if (note.has("title")) {
-                // If desc not found, return title as fallback
-                return note.getString("title");
+            String desc = "";
+            if (note.has("title")) {
+                desc += note.getString("title");
             }
+            if (note.has("desc")) {
+                desc += note.getString("desc");
+            }
+            return desc;
         } catch (JSONException e) {
             Log.e(TAG, "Error extracting description from note: " + e.getMessage());
         }
