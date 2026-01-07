@@ -169,13 +169,13 @@ public class FileDownloader {
             String relativePath;
             if (isImageFile(fileExtension)) {
                 collectionUri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-                relativePath = Environment.DIRECTORY_PICTURES + File.separator + "xhs";
+                relativePath = Environment.DIRECTORY_PICTURES + File.separator + "xhsdn";
             } else if (isVideoFile(fileExtension)) {
                 collectionUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-                relativePath = Environment.DIRECTORY_MOVIES + File.separator + "xhs";
+                relativePath = Environment.DIRECTORY_MOVIES + File.separator + "xhsdn";
             } else {
                 collectionUri = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
-                relativePath = Environment.DIRECTORY_DOWNLOADS + File.separator + "xhs";
+                relativePath = Environment.DIRECTORY_DOWNLOADS + File.separator + "xhsdn";
             }
             
             // 删除已存在的同名文件，以避免重复文件
@@ -242,12 +242,12 @@ public class FileDownloader {
      * Save file to filesystem (fallback for older Android versions or MediaStore failures)
      */
     private File saveToFileSystem(String url, String fileName, ResponseBody body) throws IOException {
-        // Always use public directory with "xhs" subfolder
+        // Always use public directory with "xhsdn" subfolder
         File destinationDir;
         // Try to use public Pictures directory first (requires permissions)
         File publicPicturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
         if (publicPicturesDir != null) {
-            destinationDir = new File(publicPicturesDir, "xhs");
+            destinationDir = new File(publicPicturesDir, "xhsdn");
         } else {
             destinationDir = null;
         }
@@ -276,7 +276,7 @@ public class FileDownloader {
         // If we can't write to public directory, fall back to app's private directory
         if (!canWriteToPublic) {
             Log.d(TAG, "Falling back to app's private directory");
-            destinationDir = new File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "xhs");
+            destinationDir = new File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "xhsdn");
         } else {
             Log.d(TAG, "Using public Pictures directory");
         }

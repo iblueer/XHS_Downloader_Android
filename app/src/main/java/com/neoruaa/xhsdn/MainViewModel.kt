@@ -184,7 +184,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             )
-            val postId = currentUrl?.let { downloader.extractPostId(it) } ?: "image"
+            val postId = currentUrl?.let { downloader.extractPostId(it) } ?: "webview"
             urls.forEachIndexed { index, rawUrl ->
                 val transformed = downloader.transformXhsCdnUrl(rawUrl).takeUnless { it.isNullOrEmpty() } ?: rawUrl
                 val extension = determineFileExtension(transformed)

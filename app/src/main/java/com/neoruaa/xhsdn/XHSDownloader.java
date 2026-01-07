@@ -1429,11 +1429,11 @@ public class XHSDownloader {
                     continue; // Skip to next live photo pair
                 }
 
-                // Always use MediaStore directory with "xhs" subfolder for consistent location
+                // Always use MediaStore directory with "xhsdn" subfolder for consistent location
                 File destinationDir;
                 File publicPicturesDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES);
                 if (publicPicturesDir != null) {
-                    destinationDir = new File(publicPicturesDir, "xhs");
+                    destinationDir = new File(publicPicturesDir, "xhsdn");
                 } else {
                     destinationDir = context.getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);
                 }

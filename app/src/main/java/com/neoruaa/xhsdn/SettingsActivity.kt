@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
@@ -70,6 +71,7 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.icons.useful.Refresh
 import top.yukonga.miuix.kmp.icon.icons.other.GitHub
 import top.yukonga.miuix.kmp.icon.icons.useful.Back
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
@@ -265,8 +267,8 @@ private fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         PreferenceRow(
-                            title = "生成Live Photo",
-                            description = "图片+视频时自动生成Live Photo",
+                            title = "生成 Live Photo",
+                            description = "关闭后 Live Photo 将作为图片+视频分别下载",
                             checked = uiState.createLivePhotos,
                             onCheckedChange = onCreateLivePhotosChange
                         )
@@ -298,16 +300,28 @@ private fun SettingsScreen(
                             singleLine = false,
                             maxLines = 3,
                             keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(onDone = { })
+                            keyboardActions = KeyboardActions(onDone = { }),
+                            trailingIcon = {
+                                if (uiState.useCustomNaming) {
+                                    Icon(
+                                        imageVector = MiuixIcons.Useful.Refresh,
+                                        contentDescription = "重置模板",
+                                        modifier = Modifier
+                                            .padding(end = 16.dp)
+                                            .size(20.dp)
+                                            .clickable { onResetTemplate() }
+                                    )
+                                }
+                            },
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TextButton(text = "重置模板", onClick = onResetTemplate, enabled = uiState.useCustomNaming)
+//                            TextButton(text = "重置模板", onClick = onResetTemplate, enabled = uiState.useCustomNaming)
                             Text(
-                                modifier = Modifier.padding(start = 10.dp),
+//                                modifier = Modifier.padding(start = 10.dp),
                                 text = "点击下方占位符可插入到光标处",
                                 color = Color.Gray
                             )

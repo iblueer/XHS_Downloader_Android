@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -127,7 +128,7 @@ private fun WebViewScreen(
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.cacheMode = WebSettings.LOAD_DEFAULT
-            settings.userAgentString = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
             settings.setSupportZoom(true)
             settings.builtInZoomControls = true
             settings.displayZoomControls = false
@@ -253,7 +254,19 @@ private fun WebViewScreen(
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 loading = false
-                view?.let { applyDefaultZoom(it) }
+//                view?.let { applyDefaultZoom(it) }
+            }
+
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): Boolean {
+                if (request?.url?.scheme == "http" || request?.url?.scheme == "https") {
+                    view?.let { loadUrl(it, request.url.toString()) }
+                } else {
+                    return true
+                }
+                return super.shouldOverrideUrlLoading(view, request)
             }
         }
         webView.webChromeClient = object : WebChromeClient() {
@@ -276,7 +289,7 @@ private fun loadUrl(webView: WebView, raw: String) {
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
         url = "https://$url"
     }
-    applyDefaultZoom(webView)
+//    applyDefaultZoom(webView)
     webView.loadUrl(url)
 }
 
