@@ -903,8 +903,9 @@ public class XHSDownloader {
                         }
                     }
                     
-                    // Check for corresponding Live Photo video
+                    // Check for corresponding Live Photo video and extract resolutions
                     String livePhotoVideoUrl = null;
+                    int videoWidth = 0, videoHeight = 0;
                     if (image.has("stream")) {
                         JSONObject stream = image.getJSONObject("stream");
                         if (stream.has("h264") && stream.getJSONArray("h264").length() > 0) {
@@ -916,6 +917,34 @@ public class XHSDownloader {
                                 } else if (h264Json.has("url")) {
                                     livePhotoVideoUrl = h264Json.getString("url");
                                 }
+                                // Extract video resolution for Live Photo detection
+                                if (h264Json.has("width")) {
+                                    videoWidth = h264Json.getInt("width");
+                                }
+                                if (h264Json.has("height")) {
+                                    videoHeight = h264Json.getInt("height");
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Extract image resolution for Live Photo detection
+                    int imageWidth = 0, imageHeight = 0;
+                    if (image.has("width")) {
+                        imageWidth = image.getInt("width");
+                    }
+                    if (image.has("height")) {
+                        imageHeight = image.getInt("height");
+                    }
+                    // Also try to find resolution in infoList (some notes use this structure)
+                    if ((imageWidth <= 0 || imageHeight <= 0) && image.has("infoList")) {
+                        JSONArray infoList = image.getJSONArray("infoList");
+                        for (int k = 0; k < infoList.length(); k++) {
+                            JSONObject info = infoList.getJSONObject(k);
+                            if (info.has("width") && info.has("height")) {
+                                imageWidth = info.getInt("width");
+                                imageHeight = info.getInt("height");
+                                break;
                             }
                         }
                     }
@@ -923,11 +952,22 @@ public class XHSDownloader {
                     // Add to media pairs - either paired or as single image
                     if (imageUrl != null) {
                         if (livePhotoVideoUrl != null) {
-                            Log.d(TAG, "Matched live photo: image=" + imageUrl + ", video=" + livePhotoVideoUrl);
-                            mediaPairs.add(new MediaPair(imageUrl, livePhotoVideoUrl, true)); // paired live photo with original URLs
-                            // For live photos, we don't trigger video warning since they are legitimate image+video pairs
-                            // Mark that videos have been detected but don't show warning
-                            videosDetected = true;
+                            Log.d(TAG, "Potential live photo detected: image=" + imageUrl + ", video=" + livePhotoVideoUrl);
+                            MediaPair pair = new MediaPair(imageUrl, livePhotoVideoUrl, true);
+                            pair.setImageResolution(imageWidth, imageHeight);
+                            pair.setVideoResolution(videoWidth, videoHeight);
+                            
+                            // Use smart detection based on resolution matching
+                            if (pair.shouldCreateLivePhoto()) {
+                                Log.d(TAG, "Confirmed as Live Photo (resolutions match)");
+                                mediaPairs.add(pair);
+                                videosDetected = true;
+                            } else {
+                                Log.d(TAG, "Detected as Video with cover (resolutions differ) - separating image and video");
+                                // Add as separate image (not a live photo pair)
+                                mediaPairs.add(new MediaPair(imageUrl, null, false));
+                                // The video will be handled separately through note.video section
+                            }
                         } else {
                             mediaPairs.add(new MediaPair(imageUrl, null, false)); // single image with original URL
                         }
@@ -1051,6 +1091,11 @@ public class XHSDownloader {
         String imageUrl;
         String videoUrl;
         boolean isLivePhoto;
+        // Resolution fields for smart Live Photo detection
+        int imageWidth;
+        int imageHeight;
+        int videoWidth;
+        int videoHeight;
 
         MediaPair(String originalImageUrl, String originalVideoUrl, boolean isLivePhoto) {
             this.originalImageUrl = originalImageUrl;
@@ -1058,6 +1103,57 @@ public class XHSDownloader {
             this.imageUrl = originalImageUrl;  // Initialize with original, will be transformed later
             this.videoUrl = originalVideoUrl;  // Initialize with original, will be transformed later
             this.isLivePhoto = isLivePhoto;
+        }
+
+        /**
+         * Set image resolution from JSON data
+         */
+        void setImageResolution(int width, int height) {
+            this.imageWidth = width;
+            this.imageHeight = height;
+        }
+
+        /**
+         * Set video resolution from JSON data
+         */
+        void setVideoResolution(int width, int height) {
+            this.videoWidth = width;
+            this.videoHeight = height;
+        }
+
+        /**
+         * Determine if this should be treated as a Live Photo based on resolution matching.
+         * 
+         * Live Photo: image and video have the SAME resolution (or same aspect ratio within tolerance)
+         * Video with cover: image and video have DIFFERENT resolutions
+         * 
+         * @return true if resolutions match (Live Photo), false if they differ (Video)
+         */
+        boolean shouldCreateLivePhoto() {
+            // If no video, not a live photo
+            if (videoUrl == null) {
+                return false;
+            }
+            
+            // If no resolution data available, fall back to original isLivePhoto flag
+            if (imageWidth <= 0 || imageHeight <= 0 || videoWidth <= 0 || videoHeight <= 0) {
+                Log.d(TAG, "Resolution data missing, using original flag: isLivePhoto=" + isLivePhoto);
+                return isLivePhoto;
+            }
+            
+            // Check if resolutions match exactly
+            boolean exactMatch = (imageWidth == videoWidth && imageHeight == videoHeight);
+            
+            // Also check aspect ratio match (allow for slight differences due to compression)
+            float imageAspect = (float) imageWidth / imageHeight;
+            float videoAspect = (float) videoWidth / videoHeight;
+            boolean aspectMatch = Math.abs(imageAspect - videoAspect) < 0.01f;
+            
+            Log.d(TAG, String.format("Resolution comparison: image=%dx%d (%.3f), video=%dx%d (%.3f), exactMatch=%s, aspectMatch=%s",
+                    imageWidth, imageHeight, imageAspect, videoWidth, videoHeight, videoAspect, exactMatch, aspectMatch));
+            
+            // Consider it a Live Photo if exact match OR aspect ratio matches
+            return exactMatch || aspectMatch;
         }
     }
 
