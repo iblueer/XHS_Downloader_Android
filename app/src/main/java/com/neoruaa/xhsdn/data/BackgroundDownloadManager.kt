@@ -9,8 +9,10 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.neoruaa.xhsdn.DownloadCallback
 import com.neoruaa.xhsdn.MainActivity
+import com.neoruaa.xhsdn.XHSApplication
 import com.neoruaa.xhsdn.R
 import com.neoruaa.xhsdn.XHSDownloader
+import com.neoruaa.xhsdn.utils.NotificationHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,8 +28,9 @@ object BackgroundDownloadManager {
     private const val TAG = "BackgroundDownload"
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val activeJobs = ConcurrentHashMap<Long, Job>()
-    private const val CHANNEL_ID = "auto_download_channel_high"
-    private const val NOTIFICATION_ID = 1001
+    private val activeUrls = ConcurrentHashMap.newKeySet<String>()
+    private const val CHANNEL_ID = "xhs_download_channel_v2"
+    private const val BASE_NOTIFICATION_ID = 1000
 
     fun startDownload(context: Context, url: String, title: String? = null) {
         Log.d(TAG, "startDownload: $url, title: $title")
@@ -36,16 +39,27 @@ object BackgroundDownloadManager {
         // Ensure TaskManager is initialized
         TaskManager.init(appContext)
 
-        // Check for duplicates
+        // 背景下载允许在任何情况下尝试，去重逻辑由 activeUrls 承担
+        Log.d(TAG, "startDownload attempt for: $url")
+        
+        // Check for duplicates - atomically add to set
+        if (!activeUrls.add(url)) {
+            Log.d(TAG, "startDownload: Task already active, skipping duplicate. URL: $url")
+            return
+        }
+        
+        // Also check if TaskManager has it recently (redundant but safe)
         if (TaskManager.hasRecentTask(url)) {
-            Log.d(TAG, "startDownload: Task matches recent task, skipping duplicate download. URL: $url")
+            Log.d(TAG, "startDownload: Task matches recent task in DB, skipping. URL: $url")
+            activeUrls.remove(url)
             return
         }
 
         scope.launch {
+            val prepId = url.hashCode()
             var taskId: Long = -1 // Initialize with invalid ID
             try {
-                showNotification(appContext, "正在准备下载...", url, true)
+                NotificationHelper.showDownloadNotification(appContext, prepId, "正在准备下载...", url, true, showProgress = false)
 
                 // 1. Get info
                 // We run this inside runCatching because getMediaCount might throw or do network ops
@@ -61,7 +75,9 @@ object BackgroundDownloadManager {
                 
                 TaskManager.startTask(taskId)
                 
-                showNotification(appContext, "正在下载...", "共 $mediaCount 个文件", true)
+                // 取消准备阶段的通知，替换为带 ID 的正式任务通知
+                NotificationHelper.cancelNotification(appContext, prepId)
+                NotificationHelper.showDownloadNotification(appContext, taskId.toInt(), "正在下载...", "共 $mediaCount 个文件", true)
 
                 val completedFiles = java.util.concurrent.atomic.AtomicInteger(0)
                 val failedFiles = java.util.concurrent.atomic.AtomicInteger(0)
@@ -103,14 +119,14 @@ object BackgroundDownloadManager {
                     
                     if (completed > 0) {
                         TaskManager.completeTask(taskId, true)
-                        showNotification(appContext, "下载完成", "成功下载 $completed 个文件", false)
+                        NotificationHelper.showDownloadNotification(appContext, taskId.toInt(), "下载完成", "成功下载 $completed 个文件", false)
                     } else {
                         TaskManager.completeTask(taskId, false, "未下载任何文件")
-                        showNotification(appContext, "下载失败", "未能下载文件", false)
+                        NotificationHelper.showDownloadNotification(appContext, taskId.toInt(), "下载失败", "未能下载文件", false)
                     }
                 } else {
                     TaskManager.completeTask(taskId, false, "下载过程出错")
-                    showNotification(appContext, "下载失败", "请检查网络或链接", false)
+                    NotificationHelper.showDownloadNotification(appContext, taskId.toInt(), "下载失败", "请检查网络或链接", false)
                 }
 
             } catch (e: Exception) {
@@ -120,20 +136,21 @@ object BackgroundDownloadManager {
                     if (taskId != -1L) {
                         TaskManager.completeTask(taskId, false, "下载已取消")
                     }
-                    showNotification(appContext, "下载已取消", "任务已被用户停止", false)
+                    NotificationHelper.showDownloadNotification(appContext, if (taskId != -1L) taskId.toInt() else prepId, "下载已取消", "任务已被用户停止", false)
                 } else {
                     Log.e(TAG, "Download error for task $taskId", e)
                     // If task was created, fail it
                     if (taskId != -1L) {
                         TaskManager.completeTask(taskId, false, e.message ?: "未知错误")
                     }
-                    showNotification(appContext, "下载出错", e.message ?: "未知错误", false)
+                    NotificationHelper.showDownloadNotification(appContext, if (taskId != -1L) taskId.toInt() else prepId, "下载出错", e.message ?: "未知错误", false)
                 }
             } finally {
                // Remove job from activeJobs map regardless of success or failure
-               if (taskId != -1L) {
-                   activeJobs.remove(taskId)
-               }
+                if (taskId != -1L) {
+                    activeJobs.remove(taskId)
+                }
+                activeUrls.remove(url)
             }
         }
     }
@@ -145,54 +162,6 @@ object BackgroundDownloadManager {
             job.cancel()
             TaskManager.completeTask(taskId, false, "用户手动停止")
             Log.d(TAG, "Task $taskId stopped by user")
-        }
-    }
-
-    private fun showNotification(context: Context, title: String, content: String, ongoing: Boolean) {
-        Log.d(TAG, "showNotification: $title - $content")
-        createNotificationChannel(context)
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        
-        // Intent to open Main Activity and switch to History tab
-        val intent = Intent(context, MainActivity::class.java).apply {
-             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-             putExtra("auto_download_url", "") // Empty trigger just to ensure onNewIntent is called if needed
-        }
-        
-        val pendingIntent = PendingIntent.getActivity(
-            context, 
-            0, 
-            intent, 
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setPriority(if (ongoing) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(!ongoing)
-            .setOngoing(ongoing)
-            
-        // If it's ongoing, we might want to use a progress bar, but indeterminate is fine for now
-        if (ongoing) {
-            builder.setProgress(0, 0, true)
-        }
-            
-        notificationManager.notify(NOTIFICATION_ID, builder.build())
-    }
-
-    private fun createNotificationChannel(context: Context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "后台下载通知"
-            val descriptionText = "显示自动下载的任务进度"
-            val importance = NotificationManager.IMPORTANCE_HIGH 
-            val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
-                description = descriptionText
-            }
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.createNotificationChannel(channel)
         }
     }
 }

@@ -123,15 +123,6 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private var switchToLogsTab: (() -> Unit)? = null
 
-    override fun onResume() {
-        super.onResume()
-        isForeground = true
-    }
-
-    override fun onPause() {
-        super.onPause()
-        isForeground = false
-    }
 
     private val _autoDownloadIntentUrl = mutableStateOf<String?>(null)
 
@@ -420,7 +411,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val PERMISSION_REQUEST_CODE = 3001
         const val WEBVIEW_REQUEST_CODE = 3002
-        var isForeground = false
     }
 }
 

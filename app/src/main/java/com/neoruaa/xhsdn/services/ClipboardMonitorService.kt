@@ -11,8 +11,10 @@ import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import androidx.core.app.NotificationCompat
 import com.neoruaa.xhsdn.MainActivity
+import com.neoruaa.xhsdn.XHSApplication
 import com.neoruaa.xhsdn.R
 import com.neoruaa.xhsdn.utils.UrlUtils
+import com.neoruaa.xhsdn.utils.NotificationHelper
 import com.neoruaa.xhsdn.data.BackgroundDownloadManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,6 +31,8 @@ class ClipboardMonitorService : AccessibilityService() {
     private var clipboardManager: ClipboardManager? = null
     private var lastCheckedClipText: String? = null
     private var lastProcessedUrl: String? = null
+    private var lastCheckTime: Long = 0
+    private var lastMonitoringStateNotification: Boolean? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -55,7 +59,14 @@ class ClipboardMonitorService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // 不需要处理具体的无障碍事件，只需保活
+        // 过滤无关事件，仅在窗口变化或内容变化时检查 (如点击复制)
+        val eventType = event?.eventType
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
+            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            if (isAutoDownloadEnabled()) {
+                 checkClipboard()
+            }
+        }
     }
 
     override fun onInterrupt() {
@@ -73,49 +84,65 @@ class ClipboardMonitorService : AccessibilityService() {
     }
 
     private fun checkClipboard() {
-        // 只有开启了自动下载才进行检查
         if (!isAutoDownloadEnabled()) {
-            Log.d(TAG, "Auto download is disabled, skipping clipboard check.")
             return
         }
-        
-        // 如果 App 在前台，不进行自动下载，交给前台 Activity 处理
-        if (MainActivity.isForeground) {
-            Log.d(TAG, "App is in foreground, skipping background download.")
+
+        // 节流保护：1秒内最多执行一次，防止通知弹窗触发无限循环
+        val currentTime = System.currentTimeMillis()
+        if (currentTime - lastCheckTime < 1000) {
             return
         }
+        lastCheckTime = currentTime
 
         try {
-            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            val clipboard = clipboardManager ?: (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             if (clipboard.hasPrimaryClip()) {
                 val clip = clipboard.primaryClip
-                val text = clip?.getItemAt(0)?.text?.toString()
-                Log.d(TAG, "checkClipboard: text=$text")
+                val text = clip?.getItemAt(0)?.text?.toString() ?: ""
+                
+                // 此时在后台状态反馈 (仅在状态变化时通知)
+                val isForeground = XHSApplication.isAppInForeground
+                if (lastMonitoringStateNotification != isForeground) {
+                    lastMonitoringStateNotification = isForeground
+                    if (isForeground) {
+                        NotificationHelper.showDiagnosticNotification(this, "监控状态", "App 在前台，下载器保持静默")
+                    } else {
+                        NotificationHelper.showDiagnosticNotification(this, "监控状态", "App 在后台，自动下载待命")
+                    }
+                }
 
-                // 避免重复处理相同内容
-                if (text == lastCheckedClipText) {
-                    Log.d(TAG, "checkClipboard: Same content as last check, skipping.")
+                // 移除 isForeground 拦截：即使在前后台切换的瞬间，只要复制成功，就应该触发
+                // Log.d(TAG, "checkClipboard: isAppInForeground=$isForeground, text=$text")
+
+                // 避免重复处理相同内容 (原子性检查)
+                synchronized(this) {
+                    if (text.isEmpty() || text == lastCheckedClipText) {
+                        return
+                    }
+                    lastCheckedClipText = text
+                }
+                
+                Log.d(TAG, "checkClipboard: Processing text=$text")
+
+                val url = UrlUtils.extractFirstUrl(text)
+                if (url == null) {
+                    Log.d(TAG, "No URL found in text")
                     return
                 }
-                lastCheckedClipText = text
 
-                val url = text?.let { UrlUtils.extractFirstUrl(it) }
                 if (url == lastProcessedUrl) {
                     Log.d(TAG, "Same URL as last processed, skipping.")
                     return
                 }
                 lastProcessedUrl = url
 
-                Log.d(TAG, "checkClipboard: extracted url=$url")
                 if (UrlUtils.isXhsLink(url)) {
-                    // 开始后台下载
                     Log.d(TAG, "Starting background download for valid XHS link: $url")
-                    BackgroundDownloadManager.startDownload(this, url!!, text)
+                    BackgroundDownloadManager.startDownload(this, url, text)
                 } else {
-                    Log.d(TAG, "checkClipboard: Not an XHS link or no URL found.")
+                    Log.d(TAG, "Not an XHS link: $url")
                 }
-            } else {
-                Log.d(TAG, "checkClipboard: No primary clip")
             }
         } catch (e: Exception) {
             Log.e(TAG, "checkClipboard error", e)
@@ -138,6 +165,6 @@ class ClipboardMonitorService : AccessibilityService() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "auto_download_channel_high"
+        private const val CHANNEL_ID = "xhs_download_channel_v2"
     }
 }
