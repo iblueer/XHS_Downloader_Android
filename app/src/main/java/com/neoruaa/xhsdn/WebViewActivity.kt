@@ -137,6 +137,9 @@ private fun WebViewScreen(
             setInitialScale(80)
         }
     }
+    
+    // Set to store sniffed video URLs
+    val sniffedVideoUrls = remember { mutableSetOf<String>() }
 
     DisposableEffect(webView) {
         onDispose { webView.destroy() }
@@ -200,7 +203,7 @@ private fun WebViewScreen(
                     }
                     Button(
                         onClick = {
-                            extractImages(context, webView, onResult)
+                            extractImages(context, webView, sniffedVideoUrls, onResult)
                         },
                         modifier = Modifier.weight(1f),
                         enabled = !loading,
@@ -250,11 +253,12 @@ private fun WebViewScreen(
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 loading = true
                 url?.let { urlText = TextFieldValue(it) }
+                // Clear sniffed URLs on new page load
+                sniffedVideoUrls.clear()
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 loading = false
-//                view?.let { applyDefaultZoom(it) }
             }
 
             override fun shouldOverrideUrlLoading(
@@ -268,12 +272,31 @@ private fun WebViewScreen(
                 }
                 return super.shouldOverrideUrlLoading(view, request)
             }
+
+            override fun onLoadResource(view: WebView?, url: String?) {
+                super.onLoadResource(view, url)
+                url?.let {
+                    // Sniff XHS video URLs
+                    if ((it.contains("sns-video") && it.contains("xhscdn.com")) || 
+                        it.endsWith(".mp4") || 
+                        it.contains("masterUrl")) {
+                        
+                        // Avoid duplicates
+                        if (!sniffedVideoUrls.contains(it)) {
+                            sniffedVideoUrls.add(it)
+                            android.util.Log.d("WebViewActivity", "Sniffed video URL: $it")
+                        }
+                    }
+                }
+            }
         }
+
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 progress = newProgress
             }
         }
+        
         if (!initialUrl.isNullOrBlank()) {
             loadUrl(webView, initialUrl)
         } else {
@@ -289,7 +312,6 @@ private fun loadUrl(webView: WebView, raw: String) {
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
         url = "https://$url"
     }
-//    applyDefaultZoom(webView)
     webView.loadUrl(url)
 }
 
@@ -335,6 +357,7 @@ private fun applyDefaultZoom(webView: WebView) {
 private fun extractImages(
     context: android.content.Context,
     webView: WebView,
+    sniffedUrls: Set<String>,
     onResult: (List<String>, String) -> Unit
 ) {
     webView.postDelayed({
@@ -371,12 +394,15 @@ private fun extractImages(
                     }
                 }
 
-                if (contentText.isNotEmpty()) {
+                if (contentObj != null) {
                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     val clip = android.content.ClipData.newPlainText("Content", contentText)
                     clipboard.setPrimaryClip(clip)
                     Toast.makeText(context, context.getString(R.string.desc_copied), Toast.LENGTH_SHORT).show()
                 }
+
+                // Merge extracted URLs with sniffed URLs
+                allUrls.addAll(sniffedUrls)
 
                 if (allUrls.isNotEmpty()) {
                     onResult(allUrls, contentText)

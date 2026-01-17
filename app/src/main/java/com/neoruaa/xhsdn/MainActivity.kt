@@ -450,11 +450,8 @@ private fun MainScreen(
     onDismissPrompt: () -> Unit
     ) {
     val statusListState = rememberLazyListState()
-    LaunchedEffect(uiState.status.size, selectedTab) {
-        if (uiState.status.isNotEmpty() && selectedTab == 1) {
-            statusListState.animateScrollToItem(uiState.status.lastIndex)
-        }
-    }
+
+
     val navItems = listOf(
         NavigationItem("下载", MiuixIcons.Useful.Save),
         NavigationItem("历史", MiuixIcons.Useful.Info)
@@ -783,6 +780,12 @@ private fun HistoryPage(
                     )
                 }
             } else {
+                LaunchedEffect(tasks.size) {
+                    if (tasks.isNotEmpty()) {
+                        statusListState.animateScrollToItem(0)
+                    }
+                }
+
                 LazyColumn(
                     state = statusListState,
                     contentPadding = PaddingValues(
