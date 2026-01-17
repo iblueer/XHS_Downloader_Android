@@ -49,6 +49,7 @@ object BackgroundDownloadManager {
         // Check for duplicates - atomically add to set
         if (!activeUrls.add(url)) {
             Log.d(TAG, "startDownload: Task already active, skipping duplicate. URL: $url")
+            NotificationHelper.showDiagnosticNotification(appContext, "任务忽略", "链接正在下载中，请勿重复复制")
             return
         }
         
@@ -56,6 +57,7 @@ object BackgroundDownloadManager {
         if (TaskManager.hasRecentTask(url)) {
             Log.d(TAG, "startDownload: Task matches recent task in DB, skipping. URL: $url")
             activeUrls.remove(url)
+            NotificationHelper.showDiagnosticNotification(appContext, "任务忽略", "该链接最近已下载过，请在历史页查看")
             return
         }
 

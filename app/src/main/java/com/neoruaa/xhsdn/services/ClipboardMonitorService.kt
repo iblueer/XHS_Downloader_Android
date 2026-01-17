@@ -59,12 +59,22 @@ class ClipboardMonitorService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // 过滤无关事件，仅在窗口变化或内容变化时检查 (如点击复制)
         val eventType = event?.eventType
+        val className = event?.className ?: "unknown"
+        val packageName = event?.packageName ?: "unknown"
+        
+        // 记录所有事件，以便从日志中发现规律
+        // Log.v(TAG, "onAccessibilityEvent: type=$eventType, package=$packageName, class=$className")
+        
+        // 依然保留主要过滤，但增加日志以便调试
         if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
-            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
+            
             if (isAutoDownloadEnabled()) {
-                 checkClipboard()
+                Log.d(TAG, "Event triggered check: $eventType from $packageName")
+                checkClipboard()
             }
         }
     }
@@ -84,75 +94,72 @@ class ClipboardMonitorService : AccessibilityService() {
     }
 
     private fun checkClipboard() {
-        if (!isAutoDownloadEnabled()) {
-            return
-        }
+        if (!isAutoDownloadEnabled()) return
 
-        // 节流保护：1秒内最多执行一次，防止通知弹窗触发无限循环
+        // 节流：防止短时间内被大量无意义事件淹没
         val currentTime = System.currentTimeMillis()
-        if (currentTime - lastCheckTime < 1000) {
-            return
-        }
-        lastCheckTime = currentTime
+        if (currentTime - lastCheckTime < 800) return // 稍微调小一点
 
-        try {
-            val clipboard = clipboardManager ?: (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-            if (clipboard.hasPrimaryClip()) {
-                val clip = clipboard.primaryClip
-                val text = clip?.getItemAt(0)?.text?.toString() ?: ""
+        scope.launch {
+            try {
+                // 关键点：延迟后再检查，增加重试机制解决系统同步延迟
+                var text = ""
+                var foundNew = false
                 
+                // 尝试最多 3 次，每次间隔 300ms
+                for (attempt in 1..3) {
+                    delay(300)
+                    val clipboard = clipboardManager ?: (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                    if (!clipboard.hasPrimaryClip()) continue
+                    
+                    val currentText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                    if (currentText.isNotEmpty() && currentText != lastCheckedClipText) {
+                        text = currentText
+                        foundNew = true
+                        break
+                    }
+                }
+
+                if (!foundNew) return@launch
+                
+                // 此时更新最后检查时间
+                lastCheckTime = System.currentTimeMillis()
+
                 val isForeground = XHSApplication.isAppInForeground
+                
+                // 状态诊断通知逻辑
                 if (lastMonitoringStateNotification != isForeground) {
                     lastMonitoringStateNotification = isForeground
                     if (isForeground) {
-                        NotificationHelper.showDiagnosticNotification(this, "监控状态", "App 在前台，下载器保持静默")
+                        NotificationHelper.showDiagnosticNotification(this@ClipboardMonitorService, "监控状态", "App 在前台，下载器保持静默")
                     } else {
-                        NotificationHelper.showDiagnosticNotification(this, "监控状态", "App 在后台，自动下载待命")
+                        NotificationHelper.showDiagnosticNotification(this@ClipboardMonitorService, "监控状态", "App 在后台，自动下载待命")
                     }
                 }
 
-                // 如果 App 在前台，我们仅记录已检查过此内容（避免重复气泡，如果以后有需要）
-                // 但不能让它拦截后台触发。所以我们只有在真正发起了后台下载后才更新 lastCheckedClipText
                 if (isForeground) {
-                    Log.d(TAG, "App is in foreground, skipping automatic trigger for: $text")
-                    return
+                    Log.d(TAG, "checkClipboard: App in foreground, updating text record: $text")
+                    synchronized(this@ClipboardMonitorService) {
+                        lastCheckedClipText = text
+                    }
+                    return@launch
                 }
 
-                // 避免重复触发：只有在后台模式下真正处理该 URL 时才更新状态
-                synchronized(this) {
-                    if (text == lastCheckedClipText) {
-                        return
-                    }
+                Log.d(TAG, "checkClipboard: Detected new text in background: $text")
+                synchronized(this@ClipboardMonitorService) {
+                    lastCheckedClipText = text
                 }
-                
-                Log.d(TAG, "checkClipboard: Processing background trigger for text=$text")
 
                 val url = UrlUtils.extractFirstUrl(text)
-                if (url == null) {
-                    Log.d(TAG, "No URL found in text")
-                    return
-                }
-
-                if (url == lastProcessedUrl) {
-                    Log.d(TAG, "Same URL as last processed, skipping.")
-                    return
-                }
-                
-                // 此时是在后台且是新内容，正式开始处理
-                synchronized(this) {
-                    lastCheckedClipText = text
-                    lastProcessedUrl = url
-                }
+                if (url == null) return@launch
 
                 if (UrlUtils.isXhsLink(url)) {
-                    Log.d(TAG, "Starting background download for valid XHS link: $url")
-                    BackgroundDownloadManager.startDownload(this, url, text)
-                } else {
-                    Log.d(TAG, "Not an XHS link: $url")
+                    Log.d(TAG, "checkClipboard: FOUND XHS LINK, starting download: $url")
+                    BackgroundDownloadManager.startDownload(applicationContext, url, text)
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "checkClipboard error", e)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "checkClipboard error", e)
         }
     }
 
