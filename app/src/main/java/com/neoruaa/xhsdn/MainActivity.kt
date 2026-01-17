@@ -454,9 +454,10 @@ private fun MainScreen(
     Scaffold(
         contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout),
         topBar = {
+            val title = if (selectedTab == 0) "小红书下载器" else "下载历史"
             TopAppBar(
-                title = "小红书下载器",
-                largeTitle = "小红书下载器",
+                title = title,
+                largeTitle = title,
                 scrollBehavior = scrollBehavior,
                 actions = {
                     Icon(
@@ -743,7 +744,6 @@ private fun HistoryPage(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            SmallTitle(text = "下载历史")
             
             if (tasks.isEmpty()) {
                 // 空状态
