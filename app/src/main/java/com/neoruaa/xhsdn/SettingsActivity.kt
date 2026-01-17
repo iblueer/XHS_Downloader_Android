@@ -84,7 +84,9 @@ data class SettingsUiState(
     val createLivePhotos: Boolean = true,
     val useCustomNaming: Boolean = false,
     val template: TextFieldValue = TextFieldValue(NamingFormat.DEFAULT_TEMPLATE),
-    val tokens: List<NamingFormat.TokenDefinition> = emptyList()
+    val tokens: List<NamingFormat.TokenDefinition> = emptyList(),
+    val clipboardMonitorEnabled: Boolean = false,
+    val autoViewProgress: Boolean = true  // 默认开启自动查看下载进度
 )
 
 class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
@@ -101,11 +103,15 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
         if (template.isNullOrEmpty()) {
             template = NamingFormat.DEFAULT_TEMPLATE
         }
+        val clipboardMonitorEnabled = prefs.getBoolean("clipboard_monitor_enabled", false)
+        val autoViewProgress = prefs.getBoolean("auto_view_progress", true)  // 默认开启
         return SettingsUiState(
             createLivePhotos = createLivePhotos,
             useCustomNaming = useCustomNaming,
             template = TextFieldValue(template),
-            tokens = NamingFormat.getAvailableTokens()
+            tokens = NamingFormat.getAvailableTokens(),
+            clipboardMonitorEnabled = clipboardMonitorEnabled,
+            autoViewProgress = autoViewProgress
         )
     }
 
@@ -133,12 +139,26 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
         }
     }
 
+    fun onClipboardMonitorChange(enabled: Boolean) = updateState {
+        it.copy(clipboardMonitorEnabled = enabled).also { newState ->
+            persist(newState)
+        }
+    }
+
+    fun onAutoViewProgressChange(enabled: Boolean) = updateState {
+        it.copy(autoViewProgress = enabled).also { newState ->
+            persist(newState)
+        }
+    }
+
     private fun persist(state: SettingsUiState) {
         hasChanges = true
         prefs.edit()
             .putBoolean("create_live_photos", state.createLivePhotos)
             .putBoolean("use_custom_naming_format", state.useCustomNaming)
             .putString("custom_naming_template", state.template.text.ifBlank { NamingFormat.DEFAULT_TEMPLATE })
+            .putBoolean("clipboard_monitor_enabled", state.clipboardMonitorEnabled)
+            .putBoolean("auto_view_progress", state.autoViewProgress)
             .remove("use_metadata_file_names")
             .apply()
     }
@@ -202,6 +222,8 @@ class SettingsActivity : ComponentActivity() {
                     onUseCustomNamingChange = viewModel::onUseCustomNamingChange,
                     onTemplateChange = viewModel::onTemplateChange,
                     onResetTemplate = viewModel::onResetTemplate,
+                    onClipboardMonitorChange = viewModel::onClipboardMonitorChange,
+                    onAutoViewProgressChange = viewModel::onAutoViewProgressChange,
                     topBarState = topBarState
                 )
             }
@@ -223,6 +245,8 @@ private fun SettingsScreen(
     onUseCustomNamingChange: (Boolean) -> Unit,
     onTemplateChange: (TextFieldValue) -> Unit,
     onResetTemplate: () -> Unit,
+    onClipboardMonitorChange: (Boolean) -> Unit,
+    onAutoViewProgressChange: (Boolean) -> Unit,
     topBarState: top.yukonga.miuix.kmp.basic.TopAppBarState
 ) {
     val context = LocalContext.current
@@ -271,6 +295,31 @@ private fun SettingsScreen(
                             description = "关闭后 Live Photo 将作为图片+视频分别下载",
                             checked = uiState.createLivePhotos,
                             onCheckedChange = onCreateLivePhotosChange
+                        )
+                        PreferenceRow(
+                            title = "自动查看进度",
+                            description = "开始下载后自动跳转到历史页",
+                            checked = uiState.autoViewProgress,
+                            onCheckedChange = onAutoViewProgressChange
+                        )
+                    }
+                }
+            }
+            item {
+                SmallTitle(text = "剪贴板监听")
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp),
+                    cornerRadius = 18.dp,
+                    colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.background)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        PreferenceRow(
+                            title = "剪贴板监听",
+                            description = "开启后将在前台检测剪贴板中的小红书链接",
+                            checked = uiState.clipboardMonitorEnabled,
+                            onCheckedChange = onClipboardMonitorChange
                         )
                     }
                 }

@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -44,6 +45,7 @@ import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -130,6 +132,31 @@ class MainActivity : ComponentActivity() {
             val scrollBehavior = MiuixScrollBehavior(state = topBarState)
             var selectedTab by rememberSaveable { mutableIntStateOf(0) }
             switchToLogsTab = { selectedTab = 1 }
+            
+            // 剪贴板检测相关状态
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val prefs = remember { context.getSharedPreferences("XHSDownloaderPrefs", MODE_PRIVATE) }
+            val clipboardMonitorEnabled = prefs.getBoolean("clipboard_monitor_enabled", false)
+            var detectedXhsLink by remember { mutableStateOf<String?>(null) }
+            
+            // 周期性检测剪贴板中的小红书链接（前台时每2秒检测一次）
+            LaunchedEffect(selectedTab, clipboardMonitorEnabled) {
+                if (selectedTab == 0 && clipboardMonitorEnabled) {
+                    while (true) {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
+                        val url = clipText?.let { extractFirstUrl(it) }
+                        if (url != null && (url.contains("xhslink.com") || url.contains("xiaohongshu.com"))) {
+                            detectedXhsLink = clipText
+                        } else {
+                            detectedXhsLink = null
+                        }
+                        kotlinx.coroutines.delay(2000)  // 每2秒检测一次
+                    }
+                } else {
+                    detectedXhsLink = null
+                }
+            }
 
             MiuixTheme(controller = controller) {
                 MainScreen(
@@ -140,11 +167,19 @@ class MainActivity : ComponentActivity() {
                             // 先读取剪贴板
                             val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                             val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
-                            if (clipText.isNotEmpty()) {
+                            // 提取有效链接
+                            val url = extractFirstUrl(clipText)
+                            if (url != null && (url.contains("xhslink.com") || url.contains("xiaohongshu.com"))) {
                                 viewModel.updateUrl(clipText)
+                                // 根据设置决定是否自动跳转到历史页
+                                val autoViewProgress = prefs.getBoolean("auto_view_progress", true)
+                                if (autoViewProgress) {
+                                    selectedTab = 1
+                                }
+                                viewModel.startDownload { showToast(it) }
+                            } else {
+                                showToast("剪贴板中未检测到小红书链接")
                             }
-                            selectedTab = 1
-                            viewModel.startDownload { showToast(it) }
                         }
                     },
                     onCopyText = { 
@@ -199,7 +234,9 @@ class MainActivity : ComponentActivity() {
                     selectedTab = selectedTab,
                     onTabChange = { selectedTab = it },
                     scrollBehavior = scrollBehavior,
-                    versionLabel = "v${BuildConfig.VERSION_NAME}"
+                    versionLabel = "v${BuildConfig.VERSION_NAME}",
+                    detectedXhsLink = detectedXhsLink,
+                    onDismissPrompt = { detectedXhsLink = null }
                 )
             }
         }
@@ -339,7 +376,9 @@ private fun MainScreen(
     selectedTab: Int,
     onTabChange: (Int) -> Unit,
     scrollBehavior: ScrollBehavior,
-    versionLabel: String
+    versionLabel: String,
+    detectedXhsLink: String?,
+    onDismissPrompt: () -> Unit
     ) {
     val statusListState = rememberLazyListState()
     LaunchedEffect(uiState.status.size, selectedTab) {
@@ -385,6 +424,8 @@ private fun MainScreen(
                 onDownload = onDownload,
                 onCopyText = onCopyText,
                 onOpenWeb = onOpenWeb,
+                detectedXhsLink = detectedXhsLink,
+                onDismissPrompt = onDismissPrompt,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -414,15 +455,18 @@ private fun DownloadPage(
     onDownload: () -> Unit,
     onCopyText: () -> Unit,
     onOpenWeb: () -> Unit,
+    detectedXhsLink: String? = null,
+    onDismissPrompt: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
+        modifier = modifier.fillMaxSize()
     ) {
+        // 主内容：居中显示下载按钮和操作按钮
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .align(Alignment.Center)
                 .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(24.dp)
@@ -499,6 +543,75 @@ private fun DownloadPage(
                     modifier = Modifier.weight(1f),
                     enabled = !uiState.isDownloading
                 )
+            }
+        }
+        
+        // 剪贴板检测提示气泡（叠加层，紧贴下载按钮上方）
+        if (detectedXhsLink != null && !uiState.isDownloading) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.Center)
+                    .offset(y = (-200).dp)  // 偏移到下载按钮上方
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onDismissPrompt() },
+                    cornerRadius = 16.dp,
+                    colors = CardDefaults.defaultColors(
+                        color = Color(0xFFDDECDE)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Useful.Info,
+                            contentDescription = null,
+                            tint = Color(0xFF4CAF50),
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "检测到小红书链接",
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF4CAF50)
+                            )
+                            Text(
+                                text = detectedXhsLink,
+                                fontSize = 12.sp,
+                                color = Color.Gray,
+                                maxLines = 2,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            text = "×",
+                            fontSize = 18.sp,
+                            color = Color.Gray
+                        )
+                    }
+                }
+                // 三角形指针（紧贴卡片底部）
+                androidx.compose.foundation.Canvas(
+                    modifier = Modifier.size(24.dp, 14.dp)
+                ) {
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(0f, 0f)
+                        lineTo(size.width, 0f)
+                        lineTo(size.width / 2, size.height)
+                        close()
+                    }
+                    drawPath(
+                        path = path,
+                        color = Color(0xFFDDECDE)
+                    )
+                }
             }
         }
     }
@@ -777,8 +890,7 @@ private fun TaskCell(
                 ) {
                     Text(
                         text = "重试",
-                        color = Color.White,
-                        fontSize = 14.sp
+                        color = Color.White
                     )
                 }
             }
