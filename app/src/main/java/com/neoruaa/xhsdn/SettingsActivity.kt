@@ -6,7 +6,13 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.text.TextUtils
+import android.content.ComponentName
+import android.content.Context
 import android.graphics.Color as AndroidColor
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -72,6 +78,8 @@ import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.icons.useful.Refresh
+import top.yukonga.miuix.kmp.icon.icons.useful.Info
+import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.icon.icons.other.GitHub
 import top.yukonga.miuix.kmp.icon.icons.useful.Back
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
@@ -86,7 +94,9 @@ data class SettingsUiState(
     val template: TextFieldValue = TextFieldValue(NamingFormat.DEFAULT_TEMPLATE),
     val tokens: List<NamingFormat.TokenDefinition> = emptyList(),
     val clipboardMonitorEnabled: Boolean = false,
-    val autoViewProgress: Boolean = true  // 默认开启自动查看下载进度
+    val autoViewProgress: Boolean = true,  // 默认开启自动查看下载进度
+    val autoDownloadEnabled: Boolean = false, // 自动下载模式
+    val isAccessibilityServiceEnabled: Boolean = false // 无障碍服务状态
 )
 
 class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
@@ -105,14 +115,26 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
         }
         val clipboardMonitorEnabled = prefs.getBoolean("clipboard_monitor_enabled", false)
         val autoViewProgress = prefs.getBoolean("auto_view_progress", true)  // 默认开启
+        val autoDownloadEnabled = prefs.getBoolean("auto_download_enabled", false)
         return SettingsUiState(
             createLivePhotos = createLivePhotos,
             useCustomNaming = useCustomNaming,
             template = TextFieldValue(template),
             tokens = NamingFormat.getAvailableTokens(),
             clipboardMonitorEnabled = clipboardMonitorEnabled,
-            autoViewProgress = autoViewProgress
+            autoViewProgress = autoViewProgress,
+            autoDownloadEnabled = autoDownloadEnabled
         )
+    }
+
+    fun updateAccessibilityState(enabled: Boolean) = updateState {
+        it.copy(isAccessibilityServiceEnabled = enabled)
+    }
+
+    fun onAutoDownloadChange(enabled: Boolean) = updateState {
+        it.copy(autoDownloadEnabled = enabled).also { newState ->
+            persist(newState)
+        }
     }
 
     fun onCreateLivePhotosChange(enabled: Boolean) = updateState {
@@ -159,6 +181,7 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
             .putString("custom_naming_template", state.template.text.ifBlank { NamingFormat.DEFAULT_TEMPLATE })
             .putBoolean("clipboard_monitor_enabled", state.clipboardMonitorEnabled)
             .putBoolean("auto_view_progress", state.autoViewProgress)
+            .putBoolean("auto_download_enabled", state.autoDownloadEnabled)
             .remove("use_metadata_file_names")
             .apply()
     }
@@ -224,10 +247,43 @@ class SettingsActivity : ComponentActivity() {
                     onResetTemplate = viewModel::onResetTemplate,
                     onClipboardMonitorChange = viewModel::onClipboardMonitorChange,
                     onAutoViewProgressChange = viewModel::onAutoViewProgressChange,
+                    onAutoDownloadChange = viewModel::onAutoDownloadChange,
+                    onOpenAccessibilitySettings = {
+                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        startActivity(intent)
+                    },
                     topBarState = topBarState
                 )
             }
         }
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        checkAccessibilityState()
+    }
+    
+    private fun checkAccessibilityState() {
+        val serviceClass = com.neoruaa.xhsdn.services.ClipboardMonitorService::class.java
+        val expectedComponentName = ComponentName(this, serviceClass)
+        val enabledServicesSetting = Settings.Secure.getString(
+            contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: ""
+        
+        val stringColonSplitter = TextUtils.SimpleStringSplitter(':')
+        stringColonSplitter.setString(enabledServicesSetting)
+        
+        var enabled = false
+        while (stringColonSplitter.hasNext()) {
+            val componentNameString = stringColonSplitter.next()
+            val enabledComponent = ComponentName.unflattenFromString(componentNameString)
+            if (enabledComponent != null && enabledComponent == expectedComponentName) {
+                enabled = true
+                break
+            }
+        }
+        viewModel.updateAccessibilityState(enabled)
     }
 
     private fun finishWithResult() {
@@ -247,6 +303,8 @@ private fun SettingsScreen(
     onResetTemplate: () -> Unit,
     onClipboardMonitorChange: (Boolean) -> Unit,
     onAutoViewProgressChange: (Boolean) -> Unit,
+    onAutoDownloadChange: (Boolean) -> Unit,
+    onOpenAccessibilitySettings: () -> Unit,
     topBarState: top.yukonga.miuix.kmp.basic.TopAppBarState
 ) {
     val context = LocalContext.current
@@ -321,6 +379,49 @@ private fun SettingsScreen(
                             checked = uiState.clipboardMonitorEnabled,
                             onCheckedChange = onClipboardMonitorChange
                         )
+                        
+                        if (uiState.clipboardMonitorEnabled) {
+                            PreferenceRow(
+                                title = "自动下载模式",
+                                description = "后台复制链接后自动下载并通知",
+                                checked = uiState.autoDownloadEnabled,
+                                onCheckedChange = onAutoDownloadChange
+                            )
+                            
+                            if (uiState.autoDownloadEnabled && !uiState.isAccessibilityServiceEnabled) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = MiuixIcons.Useful.Info,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFF9800),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.size(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(text = "需要开启无障碍服务", maxLines = 1)
+                                            Text(text = "系统限制，后台监听剪贴板需要该权限", color = Color.Gray)
+                                        }
+                                        Button(
+                                            onClick = onOpenAccessibilitySettings,
+                                            colors = ButtonDefaults.buttonColorsPrimary()
+                                        ) {
+                                            Text(
+                                                text = "前往开启", 
+                                                fontSize = 14.sp,
+                                                color = Color.White
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

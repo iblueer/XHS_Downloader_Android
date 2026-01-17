@@ -59,9 +59,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastCalculatedSpeed = "0kb/s"
     
     // Task tracking for history
-    private var currentTaskId: Long = 0
+    var currentTaskId: Long = 0
+        private set
     private var taskCompletedFiles: Int = 0
     private var taskFailedFiles: Int = 0
+
+    fun cancelCurrentDownload() {
+        if (downloadJob?.isActive == true) {
+            downloadJob?.cancel()
+            _uiState.update { it.copy(isDownloading = false, progressLabel = "已取消") }
+            if (currentTaskId > 0) {
+                TaskManager.completeTask(currentTaskId, false, "用户取消")
+            }
+        }
+    }
 
     private fun formatSpeed(bytesPerSecond: Double): String {
         return when {
@@ -153,6 +164,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 updateProgress()
                                 // Update task progress
                                 TaskManager.updateProgress(currentTaskId, taskCompletedFiles, taskFailedFiles)
+                                TaskManager.addFilePath(currentTaskId, filePath)
                             }
                         }
                     }

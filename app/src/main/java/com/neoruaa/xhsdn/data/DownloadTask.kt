@@ -41,7 +41,8 @@ data class DownloadTask(
     val status: TaskStatus,        // 任务状态
     val createdAt: Long,           // 创建时间
     val completedAt: Long? = null, // 完成时间
-    val errorMessage: String? = null // 错误信息
+    val errorMessage: String? = null, // 错误信息
+    val filePaths: List<String> = emptyList() // 下载的文件路径列表
 ) {
     val progress: Float
         get() = if (totalFiles > 0) (completedFiles.toFloat() / totalFiles) else 0f
@@ -65,6 +66,7 @@ data class DownloadTask(
             put("createdAt", createdAt)
             put("completedAt", completedAt ?: 0L)
             put("errorMessage", errorMessage ?: "")
+            put("filePaths", JSONArray(filePaths))
         }
     }
     
@@ -81,7 +83,10 @@ data class DownloadTask(
                 status = try { TaskStatus.valueOf(json.getString("status")) } catch (e: Exception) { TaskStatus.COMPLETED },
                 createdAt = json.getLong("createdAt"),
                 completedAt = json.optLong("completedAt", 0L).takeIf { it > 0 },
-                errorMessage = json.optString("errorMessage").takeIf { it.isNotEmpty() }
+                errorMessage = json.optString("errorMessage").takeIf { it.isNotEmpty() },
+                filePaths = json.optJSONArray("filePaths")?.let { array ->
+                    (0 until array.length()).map { array.getString(it) }
+                } ?: emptyList()
             )
         }
     }
@@ -215,6 +220,15 @@ object TaskManager {
                 else null,
                 errorMessage = if (failedFiles > 0) "部分文件下载失败" else null
             )
+        }
+    }
+
+    /**
+     * 添加文件路径到任务
+     */
+    fun addFilePath(taskId: Long, path: String) {
+        updateTask(taskId) { task ->
+            task.copy(filePaths = task.filePaths + path)
         }
     }
     

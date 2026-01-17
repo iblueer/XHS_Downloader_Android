@@ -27,7 +27,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
+import com.neoruaa.xhsdn.utils.UrlUtils
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.offset
@@ -80,6 +80,8 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.media.MediaMetadataRetriever
 import kotlinx.coroutines.Dispatchers
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.neoruaa.xhsdn.BuildConfig
 import top.yukonga.miuix.kmp.basic.Button
@@ -114,14 +116,37 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import top.yukonga.miuix.kmp.icon.icons.basic.SearchCleanup
 import top.yukonga.miuix.kmp.icon.icons.useful.Edit
+import androidx.compose.foundation.combinedClickable
 import java.io.File
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
     private var switchToLogsTab: (() -> Unit)? = null
 
+    override fun onResume() {
+        super.onResume()
+        isForeground = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isForeground = false
+    }
+
+    private val _autoDownloadIntentUrl = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        _autoDownloadIntentUrl.value = intent.getStringExtra("auto_download_url")
+        intent.removeExtra("auto_download_url")
+
+        if (Build.VERSION.SDK_INT >= 33) { // Android 13
+            val permission = Manifest.permission.POST_NOTIFICATIONS
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(permission), 200)
+            }
+        }
+        
         enableEdgeToEdge()
         com.neoruaa.xhsdn.data.TaskManager.init(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -132,6 +157,21 @@ class MainActivity : ComponentActivity() {
             val scrollBehavior = MiuixScrollBehavior(state = topBarState)
             var selectedTab by rememberSaveable { mutableIntStateOf(0) }
             switchToLogsTab = { selectedTab = 1 }
+            
+            // 处理自动下载
+            val autoUrl by _autoDownloadIntentUrl
+            LaunchedEffect(autoUrl) {
+                autoUrl?.let { url ->
+                     if (url.isNotEmpty()) {
+                        viewModel.updateUrl(url)
+                        ensureStoragePermission { 
+                            viewModel.startDownload { showToast(it) } 
+                        }
+                     }
+                     selectedTab = 1
+                     _autoDownloadIntentUrl.value = null // 消费完毕
+                }
+            }
             
             // 剪贴板检测相关状态
             val context = androidx.compose.ui.platform.LocalContext.current
@@ -145,8 +185,8 @@ class MainActivity : ComponentActivity() {
                     while (true) {
                         val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-                        val url = clipText?.let { extractFirstUrl(it) }
-                        if (url != null && (url.contains("xhslink.com") || url.contains("xiaohongshu.com"))) {
+                        val url = clipText?.let { UrlUtils.extractFirstUrl(it) }
+                        if (UrlUtils.isXhsLink(url)) {
                             detectedXhsLink = clipText
                         } else {
                             detectedXhsLink = null
@@ -168,8 +208,8 @@ class MainActivity : ComponentActivity() {
                             val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                             val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
                             // 提取有效链接
-                            val url = extractFirstUrl(clipText)
-                            if (url != null && (url.contains("xhslink.com") || url.contains("xiaohongshu.com"))) {
+                            val url = UrlUtils.extractFirstUrl(clipText)
+                            if (UrlUtils.isXhsLink(url)) {
                                 viewModel.updateUrl(clipText)
                                 // 根据设置决定是否自动跳转到历史页
                                 val autoViewProgress = prefs.getBoolean("auto_view_progress", true)
@@ -199,7 +239,7 @@ class MainActivity : ComponentActivity() {
                         if (clipText.isNotEmpty()) {
                             viewModel.updateUrl(clipText)
                         }
-                        openWebCrawl(viewModel.uiState.value.urlInput) 
+                        launchWebView(viewModel.uiState.value.urlInput) 
                     },
                     onContinueDownload = { viewModel.continueAfterVideoWarning() },
                     onMediaClick = { openFile(it) },
@@ -209,16 +249,21 @@ class MainActivity : ComponentActivity() {
                         showToast("已复制链接")
                     },
                     onBrowseUrl = { url ->
-                        try {
-                            val cleanUrl = extractFirstUrl(url)
-                            if (cleanUrl != null) {
-                                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(cleanUrl))
-                                startActivity(intent)
-                            } else {
-                                showToast("未找到有效链接")
+                        lifecycleScope.launch {
+                            withContext(Dispatchers.Main) {
+                                try {
+                                    // 使用通用URL提取
+                                    val cleanUrl = UrlUtils.extractFirstUrl(url)
+                                    if (cleanUrl != null) {
+                                        val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(cleanUrl))
+                                        startActivity(intent)
+                                    } else {
+                                        showToast("未找到有效链接")
+                                    }
+                                } catch (e: Exception) {
+                                    showToast("无法打开浏览器: ${e.message}")
+                                }
                             }
-                        } catch (e: Exception) {
-                            showToast("无法打开浏览器: ${e.message}")
                         }
                     },
                     onRetryTask = { task ->
@@ -231,6 +276,12 @@ class MainActivity : ComponentActivity() {
                     onDeleteTask = { task ->
                         com.neoruaa.xhsdn.data.TaskManager.deleteTask(task.id)
                     },
+                    onStopTask = { task ->
+                         if (viewModel.currentTaskId == task.id) {
+                             viewModel.cancelCurrentDownload()
+                         }
+                         com.neoruaa.xhsdn.data.BackgroundDownloadManager.stopTask(task.id)
+                    },
                     selectedTab = selectedTab,
                     onTabChange = { selectedTab = it },
                     scrollBehavior = scrollBehavior,
@@ -242,8 +293,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun openWebCrawl(input: String) {
-        val cleanUrl = extractFirstUrl(input)
+    private fun launchWebView(input: String) {
+        val cleanUrl = UrlUtils.extractFirstUrl(input)
         if (cleanUrl == null) {
             showToast("未找到有效链接，请重新输入")
             return
@@ -254,9 +305,15 @@ class MainActivity : ComponentActivity() {
         startActivityForResult(intent, WEBVIEW_REQUEST_CODE)
     }
 
-    private fun extractFirstUrl(text: String): String? {
-        val regex = Regex("https?://[\\w\\-.]+(?:/[\\w\\-._~:/?#\\[\\]@!$&'()*+,;=%]*)?")
-        return regex.find(text)?.value
+
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra("auto_download_url")?.let {
+            _autoDownloadIntentUrl.value = it
+            intent.removeExtra("auto_download_url")
+        }
     }
 
     private fun showToast(message: String) {
@@ -354,7 +411,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val PERMISSION_REQUEST_CODE = 3001
-        private const val WEBVIEW_REQUEST_CODE = 3002
+        const val WEBVIEW_REQUEST_CODE = 3002
+        var isForeground = false
     }
 }
 
@@ -372,6 +430,7 @@ private fun MainScreen(
     onCopyUrl: (String) -> Unit,
     onBrowseUrl: (String) -> Unit,
     onRetryTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
+    onStopTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     onDeleteTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     selectedTab: Int,
     onTabChange: (Int) -> Unit,
@@ -440,6 +499,7 @@ private fun MainScreen(
                 onCopyUrl = onCopyUrl,
                 onBrowseUrl = onBrowseUrl,
                 onRetryTask = onRetryTask,
+                onStopTask = onStopTask,
                 onDeleteTask = onDeleteTask,
                 modifier = Modifier
                     .fillMaxSize()
@@ -627,11 +687,51 @@ private fun HistoryPage(
     onCopyUrl: (String) -> Unit,
     onBrowseUrl: (String) -> Unit,
     onRetryTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
+    onStopTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     onDeleteTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val tasks by com.neoruaa.xhsdn.data.TaskManager.getAllTasks().collectAsStateWithLifecycle(initialValue = emptyList())
     val navPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    
+    var taskToDelete by remember { mutableStateOf<com.neoruaa.xhsdn.data.DownloadTask?>(null) }
+    
+    if (taskToDelete != null) {
+        androidx.compose.material3.AlertDialog(
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MiuixTheme.colorScheme.surface,
+            titleContentColor = MiuixTheme.colorScheme.onSurface,
+            textContentColor = MiuixTheme.colorScheme.onSurface,
+            onDismissRequest = { taskToDelete = null },
+            title = { Text("删除任务") },
+            text = { Text("确定要删除这条下载记录吗？已下载的文件不会被删除。") },
+            confirmButton = {
+                top.yukonga.miuix.kmp.basic.Button(
+                    onClick = {
+                        taskToDelete?.let { onDeleteTask(it) }
+                        taskToDelete = null
+                    },
+                    colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.buttonColors(
+                        Color(0xFFF44336), // Red (backgroundColor)
+                        Color.White        // White (contentColor)
+                    )
+                ) {
+                    Text("删除", color = Color.White)
+                }
+            },
+            dismissButton = {
+                top.yukonga.miuix.kmp.basic.Button(
+                    onClick = { taskToDelete = null },
+                    colors = top.yukonga.miuix.kmp.basic.ButtonDefaults.buttonColors(
+                        MiuixTheme.colorScheme.surfaceVariant, // Greyish (backgroundColor)
+                        MiuixTheme.colorScheme.onSurface       // Black (contentColor)
+                    )
+                ) {
+                    Text("取消", color = MiuixTheme.colorScheme.onSurface)
+                }
+            }
+        )
+    }
     
     Card(
         modifier = modifier,
@@ -682,11 +782,18 @@ private fun HistoryPage(
                         TaskCell(
                             task = task,
                             // 只有最后一个任务（列表第一个，因为按时间降序）显示缩略图
-                            mediaItems = if (index == 0) uiState.mediaItems else emptyList(),
+                            mediaItems = if (task.filePaths.isNotEmpty()) {
+                                task.filePaths.map { MediaItem(it, detectMediaType(it)) }
+                            } else if (index == 0 && uiState.mediaItems.isNotEmpty()) {
+                                uiState.mediaItems
+                            } else {
+                                emptyList()
+                            },
                             onCopyUrl = { onCopyUrl(task.noteUrl) },
                             onBrowseUrl = { onBrowseUrl(task.noteUrl) },
                             onRetry = { onRetryTask(task) },
-                            onDelete = { onDeleteTask(task) },
+                            onStop = { onStopTask(task) },
+                            onDelete = { taskToDelete = task },
                             onMediaClick = onMediaClick
                         )
                     }
@@ -706,6 +813,7 @@ private fun TaskCell(
     onCopyUrl: () -> Unit,
     onBrowseUrl: () -> Unit,
     onRetry: () -> Unit,
+    onStop: () -> Unit,
     onDelete: () -> Unit,
     onMediaClick: (MediaItem) -> Unit = {}
 ) {
@@ -733,6 +841,10 @@ private fun TaskCell(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
+            .combinedClickable(
+                onClick = {}, 
+                onLongClick = onDelete
+            )
             .background(MiuixTheme.colorScheme.surfaceVariant)
             .padding(12.dp)
     ) {
@@ -867,31 +979,44 @@ private fun TaskCell(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // 复制链接按钮
-            TextButton(
-                text = "复制",
-                onClick = onCopyUrl,
-                modifier = Modifier.weight(1f)
-            )
+            val isDownloading = task.status == com.neoruaa.xhsdn.data.TaskStatus.DOWNLOADING || 
+                                task.status == com.neoruaa.xhsdn.data.TaskStatus.QUEUED
             
-            // 浏览按钮
-            TextButton(
-                text = "浏览",
-                onClick = onBrowseUrl,
-                modifier = Modifier.weight(1f)
-            )
-            
-            // 重试按钮（仅失败任务显示）
-            if (task.status == com.neoruaa.xhsdn.data.TaskStatus.FAILED) {
-                Button(
-                    onClick = onRetry,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColorsPrimary()
-                ) {
-                    Text(
-                        text = "重试",
-                        color = Color.White
-                    )
+            if (isDownloading) {
+                 Button(
+                     onClick = onStop,
+                     modifier = Modifier.weight(1f),
+                     colors = ButtonDefaults.buttonColorsPrimary()
+                 ) {
+                     Text("停止", color = Color.White)
+                 }
+            } else {
+                // 复制链接按钮
+                TextButton(
+                    text = "复制",
+                    onClick = onCopyUrl,
+                    modifier = Modifier.weight(1f)
+                )
+                
+                // 浏览按钮
+                TextButton(
+                    text = "浏览",
+                    onClick = onBrowseUrl,
+                    modifier = Modifier.weight(1f)
+                )
+                
+                // 重试按钮（仅失败任务显示）
+                if (task.status == com.neoruaa.xhsdn.data.TaskStatus.FAILED) {
+                    Button(
+                        onClick = onRetry,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColorsPrimary()
+                    ) {
+                        Text(
+                            text = "重试",
+                            color = Color.White
+                        )
+                    }
                 }
             }
         }
@@ -1109,5 +1234,15 @@ private fun createVideoThumbnail(file: File): android.graphics.Bitmap? {
             file.path,
             android.provider.MediaStore.Video.Thumbnails.MINI_KIND
         )
+    }
+}
+
+private fun detectMediaType(path: String): MediaType {
+    val lowercasePath = path.lowercase(java.util.Locale.getDefault())
+    return when {
+        lowercasePath.endsWith(".mp4") -> MediaType.VIDEO
+        lowercasePath.endsWith(".jpg") || lowercasePath.endsWith(".jpeg") || 
+        lowercasePath.endsWith(".png") || lowercasePath.endsWith(".webp") -> MediaType.IMAGE
+        else -> MediaType.OTHER
     }
 }
