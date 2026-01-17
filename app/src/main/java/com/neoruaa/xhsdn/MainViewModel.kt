@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import com.neoruaa.xhsdn.data.TaskManager
+import com.neoruaa.xhsdn.data.TaskStatus
+import com.neoruaa.xhsdn.data.NoteType
 
 data class MediaItem(val path: String, val type: MediaType)
 
@@ -54,6 +57,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var currentDownloadedBytes: Long = 0
     private var lastSpeedCalculationTime: Long = 0
     private var lastCalculatedSpeed = "0kb/s"
+    
+    // Task tracking for history
+    private var currentTaskId: Long = 0
+    private var taskCompletedFiles: Int = 0
+    private var taskFailedFiles: Int = 0
 
     private fun formatSpeed(bytesPerSecond: Double): String {
         return when {
@@ -120,6 +128,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             totalMediaCount = runCatching { XHSDownloader(getApplication()).getMediaCount(targetUrl) }
                 .getOrElse { 0 }
             updateProgress()
+            
+            // Create task in TaskManager
+            val noteType = if (totalMediaCount == 1) NoteType.VIDEO else NoteType.IMAGE
+            val taskId = TaskManager.createTask(
+                noteUrl = targetUrl,
+                noteTitle = null, // Will be updated when we get title
+                noteType = noteType,
+                totalFiles = if (totalMediaCount > 0) totalMediaCount else 1
+            )
+            TaskManager.startTask(taskId)
+            currentTaskId = taskId
 
             val downloader = XHSDownloader(
                 getApplication(),
@@ -129,8 +148,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             if (displayedFiles.add(filePath)) {
                                 addMedia(filePath)
                                 downloadedCount++
+                                taskCompletedFiles++
                                 currentFileProgress = 0f // Reset current file progress when file is completed
                                 updateProgress()
+                                // Update task progress
+                                TaskManager.updateProgress(currentTaskId, taskCompletedFiles, taskFailedFiles)
                             }
                         }
                     }
@@ -233,10 +255,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _uiState.update { it.copy(isDownloading = false) }
                     if (!success) {
                         appendStatus("下载失败，请检查链接或网络")
+                        TaskManager.completeTask(currentTaskId, false, "下载失败")
                     } else {
                         appendStatus("全部下载完成")
+                        TaskManager.completeTask(currentTaskId, true)
                     }
                 }
+                // Reset task tracking variables
+                currentTaskId = 0
+                taskCompletedFiles = 0
+                taskFailedFiles = 0
                 // Reset the flag after download completes (whether successful or not)
                 hasUserContinuedAfterVideoWarning = false
             }
@@ -379,20 +407,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val url: List<String>? = downloader.extractLinks(currentUrl)
             val postIdTemp: String = url?.let { downloader.extractPostId(it.firstOrNull()) } ?: currentDownloadStartTime.toString()
             val postId = "webview_$postIdTemp"
-            urls.forEachIndexed { index, rawUrl ->
-                val transformed = downloader.transformXhsCdnUrl(rawUrl).takeUnless { it.isNullOrEmpty() } ?: rawUrl
-                val extension = determineFileExtension(transformed)
-                val fileName = "${postId}_${index + 1}.$extension"
-                downloader.downloadFile(transformed, fileName)
-            }
-            withContext(Dispatchers.Main) {
-                updateProgress()
-                appendStatus("网页转存完成")
-                // Reset download tracking when download completes
-                resetDownloadTracking()
-                _uiState.update { it.copy(showWebCrawl = false, isDownloading = false) }
-                // Reset the flag after download completes (whether successful or not)
-                hasUserContinuedAfterVideoWarning = false
+            try {
+                urls.forEachIndexed { index, rawUrl ->
+                    val transformed = downloader.transformXhsCdnUrl(rawUrl).takeUnless { it.isNullOrEmpty() } ?: rawUrl
+                    val extension = determineFileExtension(transformed)
+                    val fileName = "${postId}_${index + 1}.$extension"
+                    downloader.downloadFile(transformed, fileName)
+                }
+                withContext(Dispatchers.Main) {
+                    updateProgress()
+                    appendStatus("网页转存完成")
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    appendStatus("网页转存出错: ${e.message}")
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    // Reset download tracking when download completes (success or failure)
+                    resetDownloadTracking()
+                    _uiState.update { it.copy(showWebCrawl = false, isDownloading = false) }
+                    // Reset the flag after download completes (whether successful or not)
+                    hasUserContinuedAfterVideoWarning = false
+                }
             }
         }
     }

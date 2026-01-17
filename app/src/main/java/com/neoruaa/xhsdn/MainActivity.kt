@@ -31,9 +31,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
@@ -66,7 +69,9 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -116,6 +121,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        com.neoruaa.xhsdn.data.TaskManager.init(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             val controller = ThemeController(ColorSchemeMode.System)
@@ -131,15 +137,60 @@ class MainActivity : ComponentActivity() {
                     onUrlChange = viewModel::updateUrl,
                     onDownload = {
                         ensureStoragePermission {
+                            // 先读取剪贴板
+                            val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                            if (clipText.isNotEmpty()) {
+                                viewModel.updateUrl(clipText)
+                            }
                             selectedTab = 1
                             viewModel.startDownload { showToast(it) }
                         }
                     },
-                    onCopyText = { ensureStoragePermission { viewModel.copyDescription({ showToast("已复制文案") }, { showToast(it) }) } },
+                    onCopyText = { 
+                        // 先读取剪贴板
+                        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                        if (clipText.isNotEmpty()) {
+                            viewModel.updateUrl(clipText)
+                        }
+                        ensureStoragePermission { viewModel.copyDescription({ showToast("已复制文案") }, { showToast(it) }) } 
+                    },
                     onOpenSettings = { startActivity(Intent(this, SettingsActivity::class.java)) },
-                    onOpenWeb = { openWebCrawl(uiState.urlInput) },
+                    onOpenWeb = { 
+                        // 先读取剪贴板
+                        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                        if (clipText.isNotEmpty()) {
+                            viewModel.updateUrl(clipText)
+                        }
+                        openWebCrawl(viewModel.uiState.value.urlInput) 
+                    },
                     onContinueDownload = { viewModel.continueAfterVideoWarning() },
                     onMediaClick = { openFile(it) },
+                    onCopyUrl = { url ->
+                        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("xhs_url", url))
+                        showToast("已复制链接")
+                    },
+                    onBrowseUrl = { url ->
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                            startActivity(intent)
+                        } catch (e: Exception) {
+                            showToast("无法打开浏览器: ${e.message}")
+                        }
+                    },
+                    onRetryTask = { task ->
+                        viewModel.updateUrl(task.noteUrl)
+                        ensureStoragePermission {
+                            selectedTab = 1
+                            viewModel.startDownload { showToast(it) }
+                        }
+                    },
+                    onDeleteTask = { task ->
+                        com.neoruaa.xhsdn.data.TaskManager.deleteTask(task.id)
+                    },
                     selectedTab = selectedTab,
                     onTabChange = { selectedTab = it },
                     scrollBehavior = scrollBehavior,
@@ -276,6 +327,10 @@ private fun MainScreen(
     onOpenWeb: () -> Unit,
     onContinueDownload: () -> Unit,
     onMediaClick: (MediaItem) -> Unit,
+    onCopyUrl: (String) -> Unit,
+    onBrowseUrl: (String) -> Unit,
+    onRetryTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
+    onDeleteTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     selectedTab: Int,
     onTabChange: (Int) -> Unit,
     scrollBehavior: ScrollBehavior,
@@ -288,9 +343,8 @@ private fun MainScreen(
         }
     }
     val navItems = listOf(
-        NavigationItem("操作", MiuixIcons.Useful.Edit),
-        NavigationItem("日志", MiuixIcons.Useful.Info),
-        NavigationItem("下载", MiuixIcons.Useful.Save)
+        NavigationItem("下载", MiuixIcons.Useful.Save),
+        NavigationItem("历史", MiuixIcons.Useful.Info)
     )
     val layoutDirection = LocalLayoutDirection.current
 
@@ -307,7 +361,6 @@ private fun MainScreen(
                         contentDescription = "设置",
                         modifier = Modifier
                             .padding(end = 26.dp)
-//                            .size(24.dp)
                             .clickable { onOpenSettings() }
                     )
                 }
@@ -322,258 +375,201 @@ private fun MainScreen(
         }
     ) { padding ->
         when (selectedTab) {
-            0 -> HomePage(
+            0 -> DownloadPage(
                 uiState = uiState,
-                onUrlChange = onUrlChange,
                 onDownload = onDownload,
                 onCopyText = onCopyText,
                 onOpenWeb = onOpenWeb,
-                scrollBehavior = scrollBehavior,
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection)
                     .padding(padding)
             )
 
-            1 -> LogPage(
+            1 -> HistoryPage(
                 uiState = uiState,
                 statusListState = statusListState,
-                scrollBehavior = scrollBehavior,
+                onMediaClick = onMediaClick,
                 onOpenWeb = onOpenWeb,
                 onContinueDownload = onContinueDownload,
+                onCopyUrl = onCopyUrl,
+                onBrowseUrl = onBrowseUrl,
+                onRetryTask = onRetryTask,
+                onDeleteTask = onDeleteTask,
                 modifier = Modifier
                     .fillMaxSize()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection)
                     .padding(padding)
-            )
-
-            else -> DownloadsPage(
-                uiState = uiState,
-                onMediaClick = onMediaClick,
-                scrollBehavior = scrollBehavior,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    .padding(
-                        start = padding.calculateLeftPadding(layoutDirection),
-                        end = padding.calculateRightPadding(layoutDirection),
-                        top = padding.calculateTopPadding(),
-                        bottom = 0.dp
-                    )
             )
         }
     }
 }
 
 @Composable
-private fun HomePage(
+private fun DownloadPage(
     uiState: MainUiState,
-    onUrlChange: (String) -> Unit,
     onDownload: () -> Unit,
     onCopyText: () -> Unit,
     onOpenWeb: () -> Unit,
-    scrollBehavior: ScrollBehavior,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier
-            .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 18.dp,
-            colors = CardDefaults.defaultColors(
-                color = MiuixTheme.colorScheme.surface
-            )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            SmallTitle(text = "输入链接")
-            Column(
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            // 大号下载按钮
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clickable(enabled = !uiState.isDownloading) { onDownload() },
+                cornerRadius = 32.dp,
+                colors = CardDefaults.defaultColors(
+                    color = if (uiState.isDownloading) 
+                        MiuixTheme.colorScheme.primaryVariant
+                    else 
+                        MiuixTheme.colorScheme.primary
+                )
             ) {
-                TextField(
-                        value = uiState.urlInput,
-                        onValueChange = onUrlChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = "粘贴分享链接",
-                        useLabelAsPlaceholder = true,
-                    trailingIcon = {
-                        if (uiState.urlInput.isNotEmpty()) {
-                            Icon(
-                                imageVector = MiuixIcons.Basic.SearchCleanup,
-                                contentDescription = "清空",
-                                modifier = Modifier
-                                    .padding(end = 16.dp)
-                                    .size(20.dp)
-                                    .clickable { onUrlChange("") }
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = MiuixIcons.Useful.Save,
+                            contentDescription = "下载",
+                            modifier = Modifier.size(64.dp),
+                            tint = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = if (uiState.isDownloading) "下载中..." else "开始下载",
+                            color = Color.White,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "点击读取剪贴板并下载",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 14.sp
+                        )
+                        
+                        // 显示下载进度
+                        if (uiState.isDownloading && uiState.progressLabel.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = uiState.progressLabel,
+                                color = Color.White,
+                                fontSize = 18.sp
                             )
                         }
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions.Default.copy(imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { onDownload() })
+                    }
+                }
+            }
+            
+            // 两个次要按钮
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                TextButton(
+                    text = "复制文案",
+                    onClick = onCopyText,
+                    modifier = Modifier.weight(1f),
+                    enabled = !uiState.isDownloading
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    TextButton(
-                        text = "复制文案",
-                        onClick = onCopyText,
-                        modifier = Modifier.weight(1f),
-                        enabled = !uiState.isDownloading
-                    )
-                    Button(
-                        onClick = onDownload,
-                        modifier = Modifier.weight(1f),
-                        enabled = !uiState.isDownloading,
-                        colors = ButtonDefaults.buttonColorsPrimary()
-                    ) {
-                        Text(
-                            text = if (uiState.isDownloading) "下载中…" else "开始下载",
-                            color = Color.White
-                        )
-                    }
-                }
-                if (uiState.showWebCrawl) {
-                    Button(
-                        onClick = onOpenWeb,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors()
-                    ) {
-                        Text("JSON 解析失败？试试网页模式")
-                    }
-                } else {
-                    TextButton(
-                        text = "网页爬取模式",
-                        onClick = onOpenWeb,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+                TextButton(
+                    text = "网页爬取",
+                    onClick = onOpenWeb,
+                    modifier = Modifier.weight(1f),
+                    enabled = !uiState.isDownloading
+                )
             }
         }
     }
 }
 
 @Composable
-private fun LogPage(
+private fun HistoryPage(
     uiState: MainUiState,
+    statusListState: androidx.compose.foundation.lazy.LazyListState,
+    onMediaClick: (MediaItem) -> Unit,
     onOpenWeb: () -> Unit,
     onContinueDownload: () -> Unit,
-    statusListState: androidx.compose.foundation.lazy.LazyListState,
-    scrollBehavior: ScrollBehavior,
+    onCopyUrl: (String) -> Unit,
+    onBrowseUrl: (String) -> Unit,
+    onRetryTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
+    onDeleteTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val tasks by com.neoruaa.xhsdn.data.TaskManager.getAllTasks().collectAsStateWithLifecycle(initialValue = emptyList())
+    val navPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    
     Card(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier,
         cornerRadius = 18.dp,
         colors = CardDefaults.defaultColors(
             color = MiuixTheme.colorScheme.surface
         )
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 16.dp),
+            modifier = Modifier.fillMaxSize()
         ) {
-            SmallTitle(text = "日志状态")
-
-            if (uiState.progressLabel.isNotEmpty() || uiState.isDownloading) {
+            SmallTitle(text = "下载历史")
+            
+            if (tasks.isEmpty()) {
+                // 空状态
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
-                        .padding(bottom = 10.dp)
                         .clip(RoundedCornerShape(18.dp))
                         .background(MiuixTheme.colorScheme.surfaceVariant)
+                        .padding(32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(text = "进度  ")
-                                Text(text = uiState.progressLabel.ifEmpty { "--" }, color = Color.Gray)
-                            }
-                            Text(text = uiState.downloadProgressText, color = Color.Gray)
-                        }
-                        LinearProgressIndicator(progress = uiState.progress)
-                    }
-                }
-            }
-
-            BoxWithConstraints(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 10.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(MiuixTheme.colorScheme.surfaceVariant)
-            ) {
-                if (uiState.status.isEmpty()) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                    ) {
-                        Text("暂无内容，开始下载后会显示日志")
-                    }
-                } else {
-                    LazyColumn(
-                        state = statusListState,
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = maxHeight)
-                            .padding(16.dp)
-                            .nestedScroll(scrollBehavior.nestedScrollConnection)
-                    ) {
-                        itemsIndexed(uiState.status) { index, line ->
-                            Text(text = line, color = if (index == uiState.status.lastIndex) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onBackground)
-                        }
-                    }
-                }
-            }
-
-            if (uiState.showWebCrawl) {
-                Button(
-                    onClick = onOpenWeb,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    colors = ButtonDefaults.buttonColors()
-                ) {
-                    Text("JSON 解析失败？试试网页模式")
-                }
-            }
-
-            if (uiState.showVideoWarning) {
-                Row(modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    TextButton(
-                        text = "仍然下载",
-                        onClick = onContinueDownload,
-                        modifier = Modifier.weight(1f)
+                    Text(
+                        text = "暂无下载任务",
+                        color = Color.Gray
                     )
-                    Button(
-                        onClick = onOpenWeb,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColorsPrimary()
-                    ) {
-                        Text(
-                            text = "网页爬取模式",
-                            color = Color.White
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "点击下载按钮开始下载",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                }
+            } else {
+                LazyColumn(
+                    state = statusListState,
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        bottom = navPadding + 60.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
+                        TaskCell(
+                            task = task,
+                            // 只有最后一个任务（列表第一个，因为按时间降序）显示缩略图
+                            mediaItems = if (index == 0) uiState.mediaItems else emptyList(),
+                            onCopyUrl = { onCopyUrl(task.noteUrl) },
+                            onBrowseUrl = { onBrowseUrl(task.noteUrl) },
+                            onRetry = { onRetryTask(task) },
+                            onDelete = { onDeleteTask(task) },
+                            onMediaClick = onMediaClick
                         )
                     }
                 }
@@ -582,11 +578,221 @@ private fun LogPage(
     }
 }
 
+/**
+ * 任务 Cell 组件
+ */
 @Composable
-private fun DownloadsPage(
+private fun TaskCell(
+    task: com.neoruaa.xhsdn.data.DownloadTask,
+    mediaItems: List<MediaItem> = emptyList(),
+    onCopyUrl: () -> Unit,
+    onBrowseUrl: () -> Unit,
+    onRetry: () -> Unit,
+    onDelete: () -> Unit,
+    onMediaClick: (MediaItem) -> Unit = {}
+) {
+    val statusColor = when (task.status) {
+        com.neoruaa.xhsdn.data.TaskStatus.QUEUED -> Color(0xFF9E9E9E)       // 灰色
+        com.neoruaa.xhsdn.data.TaskStatus.DOWNLOADING -> Color(0xFF2196F3)  // 蓝色
+        com.neoruaa.xhsdn.data.TaskStatus.COMPLETED -> Color(0xFF4CAF50)    // 绿色
+        com.neoruaa.xhsdn.data.TaskStatus.FAILED -> Color(0xFFF44336)       // 红色
+    }
+    
+    val statusText = when (task.status) {
+        com.neoruaa.xhsdn.data.TaskStatus.QUEUED -> "排队中"
+        com.neoruaa.xhsdn.data.TaskStatus.DOWNLOADING -> "下载中"
+        com.neoruaa.xhsdn.data.TaskStatus.COMPLETED -> "已完成"
+        com.neoruaa.xhsdn.data.TaskStatus.FAILED -> "下载失败"
+    }
+    
+    val typeText = when (task.noteType) {
+        com.neoruaa.xhsdn.data.NoteType.IMAGE -> "图文"
+        com.neoruaa.xhsdn.data.NoteType.VIDEO -> "视频"
+        com.neoruaa.xhsdn.data.NoteType.UNKNOWN -> "未知"
+    }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(MiuixTheme.colorScheme.surfaceVariant)
+            .padding(12.dp)
+    ) {
+        // 顶部：时间 + 状态标签
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 创建时间
+            Text(
+                text = formatTime(task.createdAt),
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+            
+            // 状态标签
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(statusColor.copy(alpha = 0.15f))
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = statusText,
+                    fontSize = 11.sp,
+                    color = statusColor,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // 标题（最多两行）
+        Text(
+            text = task.noteTitle ?: task.noteUrl,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+        )
+        
+        Spacer(modifier = Modifier.height(4.dp))
+        
+        // 类型 + 文件数量
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "$typeText · ${task.totalFiles} 个文件",
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+            
+            if (task.failedFiles > 0) {
+                Text(
+                    text = " · ${task.failedFiles} 失败",
+                    fontSize = 12.sp,
+                    color = Color(0xFFF44336)
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // 进度条（仅下载中显示）
+        if (task.totalFiles > 0 && task.status == com.neoruaa.xhsdn.data.TaskStatus.DOWNLOADING) {
+            Column {
+                // 进度文本
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${task.completedFiles}/${task.totalFiles}",
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                    Text(
+                        text = "${(task.progress * 100).toInt()}%",
+                        fontSize = 11.sp,
+                        color = Color.Gray
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                // 进度条
+                LinearProgressIndicator(
+                    progress = task.progress,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+        }
+        
+        // 媒体预览网格（最后一个任务显示）
+        if (mediaItems.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+            ) {
+                mediaItems.forEach { item ->
+                    Box(
+                        modifier = Modifier
+                            .size(60.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onMediaClick(item) }
+                    ) {
+                        val bitmap = rememberThumbnail(item)
+                        bitmap?.let {
+                            Image(
+                                bitmap = it,
+                                contentDescription = null,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        
+        // 操作按钮行
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // 复制链接按钮
+            TextButton(
+                text = "复制",
+                onClick = onCopyUrl,
+                modifier = Modifier.weight(1f)
+            )
+            
+            // 浏览按钮
+            TextButton(
+                text = "浏览",
+                onClick = onBrowseUrl,
+                modifier = Modifier.weight(1f)
+            )
+            
+            // 重试按钮（仅失败任务显示）
+            if (task.status == com.neoruaa.xhsdn.data.TaskStatus.FAILED) {
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColorsPrimary()
+                ) {
+                    Text(
+                        text = "重试",
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 格式化时间戳为可读字符串
+ */
+private fun formatTime(timestamp: Long): String {
+    val sdf = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+    return sdf.format(java.util.Date(timestamp))
+}
+
+@Composable
+private fun FilesPage(
     uiState: MainUiState,
     onMediaClick: (MediaItem) -> Unit,
-    scrollBehavior: ScrollBehavior,
     modifier: Modifier = Modifier
 ) {
     val navPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -597,21 +803,20 @@ private fun DownloadsPage(
             color = MiuixTheme.colorScheme.surface
         )
     ) {
-        SmallTitle(text = "已下载")
+        SmallTitle(text = "已下载文件")
         Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-//            Spacer(modifier = Modifier.height(8.dp))
             if (uiState.mediaItems.isEmpty()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
                         .background(MiuixTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Text(
-                            text = "暂无内容，开始下载后会显示缩略图",
-                            modifier = Modifier.padding(16.dp)
-                        )
-                    }
+                ) {
+                    Text(
+                        text = "暂无已下载文件",
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
             } else {
                 LazyVerticalStaggeredGrid(
                     columns = StaggeredGridCells.Fixed(2),
@@ -621,7 +826,6 @@ private fun DownloadsPage(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(bottom = 4.dp)
-                        .nestedScroll(scrollBehavior.nestedScrollConnection)
                 ) {
                     items(uiState.mediaItems) { item ->
                         MediaPreview(item = item, onClick = { onMediaClick(item) })
