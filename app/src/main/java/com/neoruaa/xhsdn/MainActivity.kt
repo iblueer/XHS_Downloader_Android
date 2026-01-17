@@ -175,8 +175,13 @@ class MainActivity : ComponentActivity() {
                     },
                     onBrowseUrl = { url ->
                         try {
-                            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                            startActivity(intent)
+                            val cleanUrl = extractFirstUrl(url)
+                            if (cleanUrl != null) {
+                                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(cleanUrl))
+                                startActivity(intent)
+                            } else {
+                                showToast("未找到有效链接")
+                            }
                         } catch (e: Exception) {
                             showToast("无法打开浏览器: ${e.message}")
                         }
