@@ -276,6 +276,14 @@ class MainActivity : ComponentActivity() {
                     onDeleteTask = { task ->
                         com.neoruaa.xhsdn.data.TaskManager.deleteTask(task.id)
                     },
+                    onContinueTask = { task -> 
+                        viewModel.continueTask(task)
+                        selectedTab = 0 
+                    },
+                    onWebCrawlTask = { task ->
+                        viewModel.updateUrl(task.noteUrl)
+                        launchWebView(task.noteUrl)
+                    },
                     onStopTask = { task ->
                          if (viewModel.currentTaskId == task.id) {
                              viewModel.cancelCurrentDownload()
@@ -432,6 +440,8 @@ private fun MainScreen(
     onRetryTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     onStopTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     onDeleteTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
+    onContinueTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
+    onWebCrawlTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     selectedTab: Int,
     onTabChange: (Int) -> Unit,
     scrollBehavior: ScrollBehavior,
@@ -499,20 +509,9 @@ private fun MainScreen(
                 onContinueDownload = onContinueDownload,
                 onCopyUrl = onCopyUrl,
                 onBrowseUrl = onBrowseUrl,
-                onContinueDownload = onContinueDownload,
-                onCopyUrl = onCopyUrl,
-                onBrowseUrl = onBrowseUrl,
                 onRetryTask = onRetryTask,
-                // Add logic for continues task from list
-                onContinueTask = { task -> 
-                    // This uses viewModel method added recently
-                    viewModel.continueTask(task)
-                    selectedTab = 0 // Switch to download tab to see progress
-                },
-                onWebCrawlTask = { task ->
-                    viewModel.updateUrl(task.noteUrl)
-                    onOpenWeb()
-                },
+                onContinueTask = onContinueTask,
+                onWebCrawlTask = onWebCrawlTask,
                 onStopTask = onStopTask,
                 onDeleteTask = onDeleteTask,
                 modifier = Modifier
@@ -700,8 +699,7 @@ private fun HistoryPage(
     onContinueDownload: () -> Unit,
     onCopyUrl: (String) -> Unit,
     onBrowseUrl: (String) -> Unit,
-    onCopyUrl: (String) -> Unit,
-    onBrowseUrl: (String) -> Unit,
+
     onRetryTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     onContinueTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     onWebCrawlTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
@@ -1030,8 +1028,8 @@ private fun TaskCell(
                         onClick = onWebCrawl,
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(
-                            backgroundColor = MiuixTheme.colorScheme.surface,
-                            contentColor = MiuixTheme.colorScheme.onSurface
+                            MiuixTheme.colorScheme.surface,
+                            MiuixTheme.colorScheme.onSurface
                         )
                     ) {
                         Text("网页爬取", color = MiuixTheme.colorScheme.onSurface)

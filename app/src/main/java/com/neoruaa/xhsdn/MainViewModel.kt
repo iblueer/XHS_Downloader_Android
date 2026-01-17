@@ -19,6 +19,8 @@ import kotlinx.coroutines.cancel
 import com.neoruaa.xhsdn.data.TaskManager
 import com.neoruaa.xhsdn.data.TaskStatus
 import com.neoruaa.xhsdn.data.NoteType
+import kotlinx.coroutines.CancellationException
+import android.util.Log
 
 data class MediaItem(val path: String, val type: MediaType)
 
@@ -282,21 +284,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         appendStatus("✅ 下载完成")
                         _uiState.update { it.copy(isDownloading = false) }
                         
-                        if (!success) {
-                            // If failed, but it was due to waiting for user code, do NOT mark as failed
-                            // Check if current task status is WAITING_FOR_USER (race condition check)
-                             // Actually, we handle this in the catch block better.
-                             // Only mark failed if we are NOT waiting for user.
-                             // But here success=false means downloader returned false.
-                             // If cancelled, we go to catch block.
-                             
-                             // If downloader simply returned false (rare if cancelled?), complete as failed.
-                             TaskManager.completeTask(myTaskId, false, "下载过程出错")
-                             showToast("下载失败")
-                        } else {
-                             TaskManager.completeTask(myTaskId, true)
-                             showToast("下载完成")
-                        }
+                         if (!success) {
+                        // If failed, but it was due to waiting for user code, do NOT mark as failed
+                        // Check if current task status is WAITING_FOR_USER (race condition check)
+                         // Actually, we handle this in the catch block better.
+                         // Only mark failed if we are NOT waiting for user.
+                         // But here success=false means downloader returned false.
+                         // If cancelled, we go to catch block.
+                         
+                         // If downloader simply returned false (rare if cancelled?), complete as failed.
+                         TaskManager.completeTask(myTaskId, false, "下载过程出错")
+                         appendStatus("下载失败")
+                    } else {
+                         TaskManager.completeTask(myTaskId, true)
+                         appendStatus("下载完成")
+                    }
                     }
                 }
             } catch (e: Exception) {
@@ -308,12 +310,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                      } else {
                         appendStatus("⏹️ 下载已取消")
                         TaskManager.completeTask(myTaskId, false, "下载已取消")
-                        showToast("下载已取消")
                      }
                 } else {
                     appendStatus("❌ 下载出错: ${e.message}")
                     TaskManager.completeTask(myTaskId, false, e.message ?: "未知错误")
-                    showToast("下载出错: ${e.message}")
                 }
             } finally {
                 withContext(Dispatchers.Main) {
