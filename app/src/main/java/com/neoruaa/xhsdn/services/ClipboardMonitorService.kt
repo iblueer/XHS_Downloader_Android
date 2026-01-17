@@ -30,6 +30,7 @@ class ClipboardMonitorService : AccessibilityService() {
     private val TAG = "ClipboardMonitor"
     private var clipboardManager: ClipboardManager? = null
     private var lastCheckedClipText: String? = null
+    private var lastForegroundSeenText: String? = null // 用于前台日志去重
     private var lastProcessedUrl: String? = null
     private var lastCheckTime: Long = 0
     private var lastMonitoringStateNotification: Boolean? = null
@@ -136,26 +137,33 @@ class ClipboardMonitorService : AccessibilityService() {
                         NotificationHelper.showDiagnosticNotification(this@ClipboardMonitorService, "监控状态", "App 在后台，自动下载待命")
                     }
                 }
-
                 if (isForeground) {
-                    Log.d(TAG, "checkClipboard: App in foreground, updating text record: $text")
-                    synchronized(this@ClipboardMonitorService) {
-                        lastCheckedClipText = text
+                    // 前台逻辑：仅记录，不更新 lastCheckedClipText，确保切到后台后依然能识别为“新内容”
+                    if (text != lastForegroundSeenText) {
+                        Log.d(TAG, "checkClipboard: App in foreground, link detected but skipping auto-trigger: $text")
+                        lastForegroundSeenText = text
                     }
                     return@launch
                 }
 
+                // 后台逻辑：真正开始消费内容
                 Log.d(TAG, "checkClipboard: Detected new text in background: $text")
                 synchronized(this@ClipboardMonitorService) {
                     lastCheckedClipText = text
+                    lastForegroundSeenText = text // 同步前台记录
                 }
 
                 val url = UrlUtils.extractFirstUrl(text)
-                if (url == null) return@launch
+                if (url == null) {
+                    Log.v(TAG, "checkClipboard: No URL found in background text")
+                    return@launch
+                }
 
                 if (UrlUtils.isXhsLink(url)) {
                     Log.d(TAG, "checkClipboard: FOUND XHS LINK, starting download: $url")
                     BackgroundDownloadManager.startDownload(applicationContext, url, text)
+                } else {
+                    Log.v(TAG, "checkClipboard: Not an XHS link in background")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "checkClipboard error", e)
