@@ -15,7 +15,8 @@ enum class TaskStatus {
     QUEUED,      // 排队中
     DOWNLOADING, // 下载中
     COMPLETED,   // 下载完成
-    FAILED       // 下载失败
+    FAILED,      // 下载失败
+    WAITING_FOR_USER // 等待用户操作 (如视频选择)
 }
 
 /**
@@ -48,7 +49,7 @@ data class DownloadTask(
         get() = if (totalFiles > 0) (completedFiles.toFloat() / totalFiles) else 0f
     
     val isActive: Boolean
-        get() = status == TaskStatus.QUEUED || status == TaskStatus.DOWNLOADING
+        get() = status == TaskStatus.QUEUED || status == TaskStatus.DOWNLOADING || status == TaskStatus.WAITING_FOR_USER
     
     val isCompleted: Boolean
         get() = status == TaskStatus.COMPLETED || status == TaskStatus.FAILED
@@ -286,6 +287,13 @@ object TaskManager {
      */
     fun updateTaskType(taskId: Long, noteType: NoteType) {
         updateTask(taskId) { it.copy(noteType = noteType) }
+    }
+
+    /**
+     * 更新任务状态和错误信息
+     */
+    fun updateTaskStatus(taskId: Long, status: TaskStatus, errorMessage: String? = null) {
+        updateTask(taskId) { it.copy(status = status, errorMessage = errorMessage) }
     }
     
     private fun updateTask(taskId: Long, update: (DownloadTask) -> DownloadTask) {

@@ -499,7 +499,20 @@ private fun MainScreen(
                 onContinueDownload = onContinueDownload,
                 onCopyUrl = onCopyUrl,
                 onBrowseUrl = onBrowseUrl,
+                onContinueDownload = onContinueDownload,
+                onCopyUrl = onCopyUrl,
+                onBrowseUrl = onBrowseUrl,
                 onRetryTask = onRetryTask,
+                // Add logic for continues task from list
+                onContinueTask = { task -> 
+                    // This uses viewModel method added recently
+                    viewModel.continueTask(task)
+                    selectedTab = 0 // Switch to download tab to see progress
+                },
+                onWebCrawlTask = { task ->
+                    viewModel.updateUrl(task.noteUrl)
+                    onOpenWeb()
+                },
                 onStopTask = onStopTask,
                 onDeleteTask = onDeleteTask,
                 modifier = Modifier
@@ -687,7 +700,11 @@ private fun HistoryPage(
     onContinueDownload: () -> Unit,
     onCopyUrl: (String) -> Unit,
     onBrowseUrl: (String) -> Unit,
+    onCopyUrl: (String) -> Unit,
+    onBrowseUrl: (String) -> Unit,
     onRetryTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
+    onContinueTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
+    onWebCrawlTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     onStopTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     onDeleteTask: (com.neoruaa.xhsdn.data.DownloadTask) -> Unit,
     modifier: Modifier = Modifier
@@ -789,9 +806,12 @@ private fun HistoryPage(
                             } else {
                                 emptyList()
                             },
+                            
                             onCopyUrl = { onCopyUrl(task.noteUrl) },
                             onBrowseUrl = { onBrowseUrl(task.noteUrl) },
                             onRetry = { onRetryTask(task) },
+                            onContinue = { onContinueTask(task) },
+                            onWebCrawl = { onWebCrawlTask(task) },
                             onStop = { onStopTask(task) },
                             onDelete = { taskToDelete = task },
                             onMediaClick = onMediaClick
@@ -813,6 +833,8 @@ private fun TaskCell(
     onCopyUrl: () -> Unit,
     onBrowseUrl: () -> Unit,
     onRetry: () -> Unit,
+    onContinue: () -> Unit,
+    onWebCrawl: () -> Unit,
     onStop: () -> Unit,
     onDelete: () -> Unit,
     onMediaClick: (MediaItem) -> Unit = {}
@@ -822,13 +844,16 @@ private fun TaskCell(
         com.neoruaa.xhsdn.data.TaskStatus.DOWNLOADING -> Color(0xFF2196F3)  // 蓝色
         com.neoruaa.xhsdn.data.TaskStatus.COMPLETED -> Color(0xFF4CAF50)    // 绿色
         com.neoruaa.xhsdn.data.TaskStatus.FAILED -> Color(0xFFF44336)       // 红色
+        com.neoruaa.xhsdn.data.TaskStatus.WAITING_FOR_USER -> Color(0xFFFF9800) // 橙色
     }
     
     val statusText = when (task.status) {
         com.neoruaa.xhsdn.data.TaskStatus.QUEUED -> "排队中"
         com.neoruaa.xhsdn.data.TaskStatus.DOWNLOADING -> "下载中"
         com.neoruaa.xhsdn.data.TaskStatus.COMPLETED -> "已完成"
+        com.neoruaa.xhsdn.data.TaskStatus.COMPLETED -> "已完成"
         com.neoruaa.xhsdn.data.TaskStatus.FAILED -> "下载失败"
+        com.neoruaa.xhsdn.data.TaskStatus.WAITING_FOR_USER -> "等待选择"
     }
     
     val typeText = when (task.noteType) {
@@ -991,31 +1016,53 @@ private fun TaskCell(
                      Text("停止", color = Color.White)
                  }
             } else {
-                // 复制链接按钮
-                TextButton(
-                    text = "复制",
-                    onClick = onCopyUrl,
-                    modifier = Modifier.weight(1f)
-                )
                 
-                // 浏览按钮
-                TextButton(
-                    text = "浏览",
-                    onClick = onBrowseUrl,
-                    modifier = Modifier.weight(1f)
-                )
-                
-                // 重试按钮（仅失败任务显示）
-                if (task.status == com.neoruaa.xhsdn.data.TaskStatus.FAILED) {
+                // 等待用户选择状态 (显示 坚持下载/网页爬取)
+                if (task.status == com.neoruaa.xhsdn.data.TaskStatus.WAITING_FOR_USER) {
                     Button(
-                        onClick = onRetry,
+                        onClick = onContinue,
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColorsPrimary()
                     ) {
-                        Text(
-                            text = "重试",
-                            color = Color.White
+                        Text("坚持下载", color = Color.White)
+                    }
+                    Button(
+                        onClick = onWebCrawl,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            backgroundColor = MiuixTheme.colorScheme.surface,
+                            contentColor = MiuixTheme.colorScheme.onSurface
                         )
+                    ) {
+                        Text("网页爬取", color = MiuixTheme.colorScheme.onSurface)
+                    }
+                } else {
+                    // 复制链接按钮
+                    TextButton(
+                        text = "复制",
+                        onClick = onCopyUrl,
+                        modifier = Modifier.weight(1f)
+                    )
+                    
+                    // 浏览按钮
+                    TextButton(
+                        text = "浏览",
+                        onClick = onBrowseUrl,
+                        modifier = Modifier.weight(1f)
+                    )
+                    
+                    // 重试按钮（仅失败任务显示）
+                    if (task.status == com.neoruaa.xhsdn.data.TaskStatus.FAILED) {
+                        Button(
+                            onClick = onRetry,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColorsPrimary()
+                        ) {
+                            Text(
+                                text = "重试",
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }

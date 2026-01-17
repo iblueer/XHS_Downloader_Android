@@ -243,14 +243,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         if (!hasUserContinuedAfterVideoWarning) {
                             _uiState.update { it.copy(showVideoWarning = true) }
 
+                            // Update DB status to WAITING_FOR_USER so UI can show choice buttons
+                            TaskManager.updateTaskStatus(myTaskId, TaskStatus.WAITING_FOR_USER, "检测到视频，请选择下载方式")
+
                             // Cancel the download job to stop the download immediately
-                            downloadJob?.cancel()
+                            // We use a specific flag to know this was an intentional stop for user input
+                            downloadJob?.cancel(CancellationException("WAITING_FOR_USER"))
+                            
                             appendStatus("下载因检测到视频而停止")
 
                             // Update isDownloading to false when download is stopped
                             _uiState.update { it.copy(isDownloading = false) }
 
-                            appendStatus("提示：由于小红书平台升级了接口，普通爬取暂不支持视频原文件获取，点击“仍然下载”以继续以 720P 下载视频，点击“网页爬取模式”以尝试从web端获取视频原文件")
+                            appendStatus("提示：检测到视频，请选择坚持下载(720P)或网页爬取")
                         }
                         // If user has already continued, just log that video was detected but don't stop
                         else {
@@ -268,31 +273,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             // Run download with cancellation check, passing THIS job
             val currentJob = coroutineContext[Job]
-            val success = runDownloadWithCancellationCheck(downloader, targetUrl, currentJob)
-            
-            withContext(Dispatchers.Main) {
-                // Only proceed if this coroutine is still active (not cancelled)
-                if (isActive) {
-                    // Reset download tracking when download completes
-                    resetDownloadTracking()
-                    _uiState.update { it.copy(isDownloading = false) }
-                    if (!success) {
-                        appendStatus("下载失败，请检查链接或网络")
-                        TaskManager.completeTask(myTaskId, false, "下载失败")
-                    } else {
-                        appendStatus("全部下载完成")
-                        TaskManager.completeTask(myTaskId, true)
+            try {
+                val success = runDownloadWithCancellationCheck(downloader, targetUrl, currentJob)
+                
+                withContext(Dispatchers.Main) {
+                    // Only proceed if this coroutine is still active (not cancelled)
+                    if (isActive) {
+                        appendStatus("✅ 下载完成")
+                        _uiState.update { it.copy(isDownloading = false) }
+                        
+                        if (!success) {
+                            // If failed, but it was due to waiting for user code, do NOT mark as failed
+                            // Check if current task status is WAITING_FOR_USER (race condition check)
+                             // Actually, we handle this in the catch block better.
+                             // Only mark failed if we are NOT waiting for user.
+                             // But here success=false means downloader returned false.
+                             // If cancelled, we go to catch block.
+                             
+                             // If downloader simply returned false (rare if cancelled?), complete as failed.
+                             TaskManager.completeTask(myTaskId, false, "下载过程出错")
+                             showToast("下载失败")
+                        } else {
+                             TaskManager.completeTask(myTaskId, true)
+                             showToast("下载完成")
+                        }
                     }
                 }
-                
-                // Reset global currentTaskId only if it matches ours
-                if (currentTaskId == myTaskId) {
-                    currentTaskId = 0
+            } catch (e: Exception) {
+                if (e is CancellationException) {
+                     // Check if this cancellation was for WAITING_FOR_USER
+                     if (e.message == "WAITING_FOR_USER") {
+                         Log.d("MainViewModel", "Download cancelled for user input")
+                         // Do NOT complete task as failed. Leave it as WAITING_FOR_USER.
+                     } else {
+                        appendStatus("⏹️ 下载已取消")
+                        TaskManager.completeTask(myTaskId, false, "下载已取消")
+                        showToast("下载已取消")
+                     }
+                } else {
+                    appendStatus("❌ 下载出错: ${e.message}")
+                    TaskManager.completeTask(myTaskId, false, e.message ?: "未知错误")
+                    showToast("下载出错: ${e.message}")
                 }
-                taskCompletedFiles = 0
-                taskFailedFiles = 0
-                // Reset the flag after download completes (whether successful or not)
-                hasUserContinuedAfterVideoWarning = false
+            } finally {
+                withContext(Dispatchers.Main) {
+                    // Reset download tracking when download completes (success or failure)
+                    resetDownloadTracking()
+                    // Reset global currentTaskId only if it matches ours
+                    if (currentTaskId == myTaskId) {
+                        currentTaskId = 0
+                    }
+                    taskCompletedFiles = 0
+                    taskFailedFiles = 0
+                    // Reset the flag after download completes (whether successful or not)
+                    hasUserContinuedAfterVideoWarning = false
+                }
             }
         }
     }
@@ -475,6 +510,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         currentUrl?.let { url ->
             startDownload { msg -> appendStatus("错误: $msg") }
         }
+    }
+
+    fun continueTask(task: com.neoruaa.xhsdn.data.DownloadTask) {
+        updateUrl(task.noteUrl)
+        continueAfterVideoWarning()
     }
 
     fun resetVideoWarning() {
