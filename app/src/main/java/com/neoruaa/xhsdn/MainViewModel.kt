@@ -235,6 +235,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     override fun onVideoDetected() {
+                        // Correctly mark as VIDEO type in DB
+                        // Note: Live Photos don't trigger this, so they stay as IMAGE (correct)
+                        TaskManager.updateTaskType(myTaskId, NoteType.VIDEO)
+
                         // Only show the warning and stop the download if the user hasn't already chosen to continue
                         if (!hasUserContinuedAfterVideoWarning) {
                             _uiState.update { it.copy(showVideoWarning = true) }

@@ -281,6 +281,13 @@ object TaskManager {
         }
     }
     
+    /**
+     * Update task type (e.g., when video is detected)
+     */
+    fun updateTaskType(taskId: Long, noteType: NoteType) {
+        updateTask(taskId) { it.copy(noteType = noteType) }
+    }
+    
     private fun updateTask(taskId: Long, update: (DownloadTask) -> DownloadTask) {
         _tasks.value = _tasks.value.map { task ->
             if (task.id == taskId) update(task) else task

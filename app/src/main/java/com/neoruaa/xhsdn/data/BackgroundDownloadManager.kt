@@ -85,7 +85,8 @@ object BackgroundDownloadManager {
                     override fun onDownloadProgress(status: String) {}
                     override fun onDownloadProgressUpdate(downloaded: Long, total: Long) {}
                     override fun onVideoDetected() {
-                         // Should not happen as we disable stopOnVideo
+                         // Update task type to VIDEO as we found real video content
+                         TaskManager.updateTaskType(taskId, NoteType.VIDEO)
                     }
                 })
                 
