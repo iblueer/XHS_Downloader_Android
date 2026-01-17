@@ -9,6 +9,10 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.neoruaa.xhsdn.DownloadCallback
 import com.neoruaa.xhsdn.MainActivity
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Environment
+import androidx.core.content.ContextCompat
 import com.neoruaa.xhsdn.XHSApplication
 import com.neoruaa.xhsdn.R
 import com.neoruaa.xhsdn.XHSDownloader
@@ -52,6 +56,20 @@ object BackgroundDownloadManager {
         if (TaskManager.hasRecentTask(url)) {
             Log.d(TAG, "startDownload: Task matches recent task in DB, skipping. URL: $url")
             activeUrls.remove(url)
+            return
+        }
+
+        // Check for storage permissions
+        if (!hasStoragePermission(appContext)) {
+            Log.e(TAG, "startDownload: Missing storage permissions!")
+            activeUrls.remove(url)
+            NotificationHelper.showDownloadNotification(
+                appContext, 
+                url.hashCode(), 
+                "无法自动下载", 
+                "缺少存储权限，请打开 App 授予权限", 
+                false
+            )
             return
         }
 
@@ -162,6 +180,15 @@ object BackgroundDownloadManager {
             job.cancel()
             TaskManager.completeTask(taskId, false, "用户手动停止")
             Log.d(TAG, "Task $taskId stopped by user")
+        }
+    }
+
+    private fun hasStoragePermission(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         }
     }
 }

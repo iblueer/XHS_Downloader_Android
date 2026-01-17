@@ -111,21 +111,18 @@ class ClipboardMonitorService : AccessibilityService() {
                     }
                 }
 
-                // 更新最近内容记录，即使在前台也记录，避免切走时由于 state 重置导致的重复触发
-                val isNewText: Boolean
-                synchronized(this) {
-                    isNewText = text.isNotEmpty() && text != lastCheckedClipText
-                    if (isNewText) {
-                        lastCheckedClipText = text
-                    }
-                }
-
-                if (!isNewText) return
-
-                // 如果 App 在前台，不进行自动下载，交给 Activity 的气泡/手动逻辑处理
+                // 如果 App 在前台，我们仅记录已检查过此内容（避免重复气泡，如果以后有需要）
+                // 但不能让它拦截后台触发。所以我们只有在真正发起了后台下载后才更新 lastCheckedClipText
                 if (isForeground) {
                     Log.d(TAG, "App is in foreground, skipping automatic trigger for: $text")
                     return
+                }
+
+                // 避免重复触发：只有在后台模式下真正处理该 URL 时才更新状态
+                synchronized(this) {
+                    if (text == lastCheckedClipText) {
+                        return
+                    }
                 }
                 
                 Log.d(TAG, "checkClipboard: Processing background trigger for text=$text")
@@ -140,7 +137,12 @@ class ClipboardMonitorService : AccessibilityService() {
                     Log.d(TAG, "Same URL as last processed, skipping.")
                     return
                 }
-                lastProcessedUrl = url
+                
+                // 此时是在后台且是新内容，正式开始处理
+                synchronized(this) {
+                    lastCheckedClipText = text
+                    lastProcessedUrl = url
+                }
 
                 if (UrlUtils.isXhsLink(url)) {
                     Log.d(TAG, "Starting background download for valid XHS link: $url")
