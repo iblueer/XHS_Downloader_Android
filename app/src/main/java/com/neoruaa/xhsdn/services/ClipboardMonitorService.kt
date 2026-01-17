@@ -138,6 +138,6 @@ class ClipboardMonitorService : AccessibilityService() {
     }
 
     companion object {
-        private const val CHANNEL_ID = "auto_download_channel"
+        private const val CHANNEL_ID = "auto_download_channel_high"
     }
 }

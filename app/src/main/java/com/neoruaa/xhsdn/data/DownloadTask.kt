@@ -267,6 +267,19 @@ object TaskManager {
     fun getCurrentActiveTask(): DownloadTask? {
         return _tasks.value.firstOrNull { it.status == TaskStatus.DOWNLOADING }
     }
+
+    /**
+     * 检查是否存在最近的相同任务 (防止重复下载)
+     * @param url 笔记链接
+     * @param durationMillis 时间阈值 (默认 1 小时)，在此时间内已创建的任务如果在进行中或已完成，则视为存在
+     */
+    fun hasRecentTask(url: String, durationMillis: Long = 3600_000): Boolean {
+        val threshold = System.currentTimeMillis() - durationMillis
+        return _tasks.value.any { task ->
+            // URL 相同 且 (任务活跃 或 是最近创建的)
+            task.noteUrl == url && (task.isActive || task.createdAt > threshold)
+        }
+    }
     
     private fun updateTask(taskId: Long, update: (DownloadTask) -> DownloadTask) {
         _tasks.value = _tasks.value.map { task ->

@@ -26,7 +26,7 @@ object BackgroundDownloadManager {
     private const val TAG = "BackgroundDownload"
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val activeJobs = ConcurrentHashMap<Long, Job>()
-    private const val CHANNEL_ID = "auto_download_channel"
+    private const val CHANNEL_ID = "auto_download_channel_high"
     private const val NOTIFICATION_ID = 1001
 
     fun startDownload(context: Context, url: String, title: String? = null) {
@@ -35,6 +35,12 @@ object BackgroundDownloadManager {
         
         // Ensure TaskManager is initialized
         TaskManager.init(appContext)
+
+        // Check for duplicates
+        if (TaskManager.hasRecentTask(url)) {
+            Log.d(TAG, "startDownload: Task matches recent task, skipping duplicate download. URL: $url")
+            return
+        }
 
         scope.launch {
             var taskId: Long = -1 // Initialize with invalid ID
@@ -179,7 +185,7 @@ object BackgroundDownloadManager {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = "后台下载通知"
             val descriptionText = "显示自动下载的任务进度"
-            val importance = NotificationManager.IMPORTANCE_LOW 
+            val importance = NotificationManager.IMPORTANCE_HIGH 
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
             }
