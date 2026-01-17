@@ -101,7 +101,6 @@ class ClipboardMonitorService : AccessibilityService() {
                 val clip = clipboard.primaryClip
                 val text = clip?.getItemAt(0)?.text?.toString() ?: ""
                 
-                // 此时在后台状态反馈 (仅在状态变化时通知)
                 val isForeground = XHSApplication.isAppInForeground
                 if (lastMonitoringStateNotification != isForeground) {
                     lastMonitoringStateNotification = isForeground
@@ -112,18 +111,24 @@ class ClipboardMonitorService : AccessibilityService() {
                     }
                 }
 
-                // 移除 isForeground 拦截：即使在前后台切换的瞬间，只要复制成功，就应该触发
-                // Log.d(TAG, "checkClipboard: isAppInForeground=$isForeground, text=$text")
-
-                // 避免重复处理相同内容 (原子性检查)
+                // 更新最近内容记录，即使在前台也记录，避免切走时由于 state 重置导致的重复触发
+                val isNewText: Boolean
                 synchronized(this) {
-                    if (text.isEmpty() || text == lastCheckedClipText) {
-                        return
+                    isNewText = text.isNotEmpty() && text != lastCheckedClipText
+                    if (isNewText) {
+                        lastCheckedClipText = text
                     }
-                    lastCheckedClipText = text
+                }
+
+                if (!isNewText) return
+
+                // 如果 App 在前台，不进行自动下载，交给 Activity 的气泡/手动逻辑处理
+                if (isForeground) {
+                    Log.d(TAG, "App is in foreground, skipping automatic trigger for: $text")
+                    return
                 }
                 
-                Log.d(TAG, "checkClipboard: Processing text=$text")
+                Log.d(TAG, "checkClipboard: Processing background trigger for text=$text")
 
                 val url = UrlUtils.extractFirstUrl(text)
                 if (url == null) {
