@@ -50,7 +50,8 @@ object BackgroundDownloadManager {
                 // 1. Get info
                 // We run this inside runCatching because getMediaCount might throw or do network ops
                 val mediaCount = runCatching { XHSDownloader(appContext).getMediaCount(url) }.getOrElse { 0 }
-                val noteType = if (mediaCount == 1) NoteType.VIDEO else NoteType.IMAGE
+                // Default to IMAGE, update later if video detected
+                val noteType = NoteType.IMAGE
                 
                 // 2. Create Task
                 taskId = TaskManager.createTask(url, title, noteType, if (mediaCount > 0) mediaCount else 1)

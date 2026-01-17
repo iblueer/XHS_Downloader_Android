@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.cancel
 import com.neoruaa.xhsdn.data.TaskManager
 import com.neoruaa.xhsdn.data.TaskStatus
 import com.neoruaa.xhsdn.data.NoteType
@@ -141,15 +144,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             updateProgress()
             
             // Create task in TaskManager
-            val noteType = if (totalMediaCount == 1) NoteType.VIDEO else NoteType.IMAGE
+            // Default to IMAGE, update later if video detected
+            val noteType = NoteType.IMAGE 
             val taskId = TaskManager.createTask(
                 noteUrl = targetUrl,
-                noteTitle = null, // Will be updated when we get title
+                noteTitle = null, 
                 noteType = noteType,
                 totalFiles = if (totalMediaCount > 0) totalMediaCount else 1
             )
             TaskManager.startTask(taskId)
             currentTaskId = taskId
+            val myTaskId = taskId // Capture taskId locally for this coroutine
 
             val downloader = XHSDownloader(
                 getApplication(),
@@ -160,11 +165,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 addMedia(filePath)
                                 downloadedCount++
                                 taskCompletedFiles++
-                                currentFileProgress = 0f // Reset current file progress when file is completed
+                                currentFileProgress = 0f 
                                 updateProgress()
-                                // Update task progress
-                                TaskManager.updateProgress(currentTaskId, taskCompletedFiles, taskFailedFiles)
-                                TaskManager.addFilePath(currentTaskId, filePath)
+                                // Update task progress using local ID
+                                TaskManager.updateProgress(myTaskId, taskCompletedFiles, taskFailedFiles)
+                                TaskManager.addFilePath(myTaskId, filePath)
                             }
                         }
                     }
@@ -257,24 +262,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 downloader.setShouldStopOnVideo(true)
             }
-            // Run download with cancellation check
-            val success = runDownloadWithCancellationCheck(downloader, targetUrl)
+            // Run download with cancellation check, passing THIS job
+            val currentJob = coroutineContext[Job]
+            val success = runDownloadWithCancellationCheck(downloader, targetUrl, currentJob)
+            
             withContext(Dispatchers.Main) {
-                val jobStillActive = downloadJob?.isActive == true
-                if (jobStillActive) {
+                // Only proceed if this coroutine is still active (not cancelled)
+                if (isActive) {
                     // Reset download tracking when download completes
                     resetDownloadTracking()
                     _uiState.update { it.copy(isDownloading = false) }
                     if (!success) {
                         appendStatus("下载失败，请检查链接或网络")
-                        TaskManager.completeTask(currentTaskId, false, "下载失败")
+                        TaskManager.completeTask(myTaskId, false, "下载失败")
                     } else {
                         appendStatus("全部下载完成")
-                        TaskManager.completeTask(currentTaskId, true)
+                        TaskManager.completeTask(myTaskId, true)
                     }
                 }
-                // Reset task tracking variables
-                currentTaskId = 0
+                
+                // Reset global currentTaskId only if it matches ours
+                if (currentTaskId == myTaskId) {
+                    currentTaskId = 0
+                }
                 taskCompletedFiles = 0
                 taskFailedFiles = 0
                 // Reset the flag after download completes (whether successful or not)
@@ -475,7 +485,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun runDownloadWithCancellationCheck(downloader: XHSDownloader, targetUrl: String): Boolean {
+    private fun runDownloadWithCancellationCheck(downloader: XHSDownloader, targetUrl: String, job: Job?): Boolean {
         // Create a thread to run the download
         var result = false
         val thread = Thread {
@@ -483,15 +493,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         thread.start()
 
-        // Periodically check if the job was cancelled
+        // Periodically check if the SPECIFIC job was cancelled
         while (thread.isAlive) {
-            if (downloadJob?.isActive == false) {
+            if (job?.isActive == false) {
                 // Interrupt the thread
                 thread.interrupt()
                 // Wait a bit for the thread to respond to interruption
                 Thread.sleep(100)
-                // Don't use thread.stop() as it's deprecated and unsafe
-                // Instead, rely on the interrupt mechanism and XHSDownloader's checks
                 break
             }
             Thread.sleep(100) // Check every 100ms
