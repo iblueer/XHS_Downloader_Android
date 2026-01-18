@@ -696,19 +696,26 @@ private fun DownloadPage(
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "点击读取剪贴板并下载",
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 14.sp
-                        )
                         
-                        // 显示下载进度
-                        if (uiState.isDownloading && uiState.progressLabel.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(16.dp))
+                        // 下载中时显示任务标题，否则显示提示
+                        if (uiState.isDownloading) {
+                            // 显示当前任务标题（与历史卡片一致）
+                            val activeTask = com.neoruaa.xhsdn.data.TaskManager.getCurrentActiveTask()
+                            val taskTitle = activeTask?.noteTitle ?: activeTask?.noteUrl ?: " "
                             Text(
-                                text = uiState.progressLabel,
-                                color = Color.White,
-                                fontSize = 18.sp
+                                text = taskTitle,
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth(0.8f),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        } else {
+                            Text(
+                                text = "点击读取剪贴板并下载",
+                                color = Color.White.copy(alpha = 0.8f),
+                                fontSize = 14.sp
                             )
                         }
                     }
