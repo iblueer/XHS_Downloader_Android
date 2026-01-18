@@ -29,7 +29,10 @@ object NotificationHelper {
             .setAutoCancel(true)
             .setGroup("diagnostic")
             .setOnlyAlertOnce(false)
+            .setDefaults(NotificationCompat.DEFAULT_ALL) // 确保使用系统默认的声音/震动
 
+        // 强制 Pop-up 关键：先取消旧的，再发新的，强制系统视为新通知
+        notificationManager.cancel(id)
         notificationManager.notify(id, builder.build())
     }
 
