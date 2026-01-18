@@ -21,11 +21,7 @@ class XHSApplication : Application() {
                 Log.d("XHSApplication", "onActivityStarted: ${activity.javaClass.simpleName}, count=$runningActivities")
                 if (runningActivities == 1) {
                     isAppInForeground = true
-                    NotificationHelper.showDiagnosticNotification(
-                        this@XHSApplication,
-                        "App 状态诊断",
-                        "切换至前台"
-                    )
+                    // Log.d("XHSApplication", "App enters foreground")
                 }
             }
             override fun onActivityResumed(activity: Activity) {}
@@ -36,11 +32,7 @@ class XHSApplication : Application() {
                 if (runningActivities <= 0) {
                     runningActivities = 0
                     isAppInForeground = false
-                    NotificationHelper.showDiagnosticNotification(
-                        this@XHSApplication,
-                        "App 状态诊断",
-                        "已进入后台 (自动模式生效中)"
-                    )
+                    // Log.d("XHSApplication", "App enters background")
                 }
             }
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
