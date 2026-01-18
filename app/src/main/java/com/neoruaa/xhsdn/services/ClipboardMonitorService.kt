@@ -128,15 +128,8 @@ class ClipboardMonitorService : AccessibilityService() {
 
                 val isForeground = XHSApplication.isAppInForeground
                 
-                // 状态诊断通知逻辑
-                if (lastMonitoringStateNotification != isForeground) {
-                    lastMonitoringStateNotification = isForeground
-                    if (isForeground) {
-                        NotificationHelper.showDiagnosticNotification(this@ClipboardMonitorService, "监控状态", "App 在前台，下载器保持静默")
-                    } else {
-                        NotificationHelper.showDiagnosticNotification(this@ClipboardMonitorService, "监控状态", "App 在后台，自动下载待命")
-                    }
-                }
+                // 移除重复通知：状态切换通知已由 XHSApplication 负责，此处无需重复上报
+                // if (lastMonitoringStateNotification != isForeground) { ... }
                 if (isForeground) {
                     // 前台逻辑：仅记录，不更新 lastCheckedClipText，确保切到后台后依然能识别为“新内容”
                     if (text != lastForegroundSeenText) {
