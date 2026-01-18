@@ -96,6 +96,7 @@ data class SettingsUiState(
     val clipboardMonitorEnabled: Boolean = false,
     val autoViewProgress: Boolean = true,  // 默认开启自动查看下载进度
     val autoDownloadEnabled: Boolean = false, // 自动下载模式
+    val debugNotificationEnabled: Boolean = false, // 详细调试通知
     val isAccessibilityServiceEnabled: Boolean = false // 无障碍服务状态
 )
 
@@ -116,6 +117,7 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
         val clipboardMonitorEnabled = prefs.getBoolean("clipboard_monitor_enabled", false)
         val autoViewProgress = prefs.getBoolean("auto_view_progress", true)  // 默认开启
         val autoDownloadEnabled = prefs.getBoolean("auto_download_enabled", false)
+        val debugNotificationEnabled = prefs.getBoolean("debug_notification_enabled", false)
         return SettingsUiState(
             createLivePhotos = createLivePhotos,
             useCustomNaming = useCustomNaming,
@@ -123,7 +125,8 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
             tokens = NamingFormat.getAvailableTokens(),
             clipboardMonitorEnabled = clipboardMonitorEnabled,
             autoViewProgress = autoViewProgress,
-            autoDownloadEnabled = autoDownloadEnabled
+            autoDownloadEnabled = autoDownloadEnabled,
+            debugNotificationEnabled = debugNotificationEnabled
         )
     }
 
@@ -133,6 +136,12 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
 
     fun onAutoDownloadChange(enabled: Boolean) = updateState {
         it.copy(autoDownloadEnabled = enabled).also { newState ->
+            persist(newState)
+        }
+    }
+
+    fun onDebugNotificationChange(enabled: Boolean) = updateState {
+        it.copy(debugNotificationEnabled = enabled).also { newState ->
             persist(newState)
         }
     }
@@ -182,6 +191,7 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
             .putBoolean("clipboard_monitor_enabled", state.clipboardMonitorEnabled)
             .putBoolean("auto_view_progress", state.autoViewProgress)
             .putBoolean("auto_download_enabled", state.autoDownloadEnabled)
+            .putBoolean("debug_notification_enabled", state.debugNotificationEnabled)
             .remove("use_metadata_file_names")
             .apply()
     }
@@ -248,6 +258,7 @@ class SettingsActivity : ComponentActivity() {
                     onClipboardMonitorChange = viewModel::onClipboardMonitorChange,
                     onAutoViewProgressChange = viewModel::onAutoViewProgressChange,
                     onAutoDownloadChange = viewModel::onAutoDownloadChange,
+                    onDebugNotificationChange = viewModel::onDebugNotificationChange,
                     onOpenAccessibilitySettings = {
                         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                         startActivity(intent)
@@ -304,6 +315,7 @@ private fun SettingsScreen(
     onClipboardMonitorChange: (Boolean) -> Unit,
     onAutoViewProgressChange: (Boolean) -> Unit,
     onAutoDownloadChange: (Boolean) -> Unit,
+    onDebugNotificationChange: (Boolean) -> Unit,
     onOpenAccessibilitySettings: () -> Unit,
     topBarState: top.yukonga.miuix.kmp.basic.TopAppBarState
 ) {
@@ -378,6 +390,13 @@ private fun SettingsScreen(
                             description = "开启后将在前台检测剪贴板中的小红书链接",
                             checked = uiState.clipboardMonitorEnabled,
                             onCheckedChange = onClipboardMonitorChange
+                        )
+
+                        PreferenceRow(
+                            title = "详细调试通知",
+                            description = "显示剪贴板监听的详细日志（如无效链接原因）",
+                            checked = uiState.debugNotificationEnabled,
+                            onCheckedChange = onDebugNotificationChange
                         )
                         
                         if (uiState.clipboardMonitorEnabled) {

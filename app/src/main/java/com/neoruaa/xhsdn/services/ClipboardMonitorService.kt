@@ -94,12 +94,26 @@ class ClipboardMonitorService : AccessibilityService() {
         return prefs.getBoolean("auto_download_enabled", false)
     }
 
+    private fun isDebugNotificationEnabled(): Boolean {
+        val prefs = getSharedPreferences("XHSDownloaderPrefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("debug_notification_enabled", false)
+    }
+
+    private fun sendDebugNotification(content: String) {
+        if (isDebugNotificationEnabled()) {
+            NotificationHelper.showDiagnosticNotification(this, "调试日志", content)
+        }
+    }
+
     private fun checkClipboard() {
         if (!isAutoDownloadEnabled()) return
 
         // 节流：防止短时间内被大量无意义事件淹没
         val currentTime = System.currentTimeMillis()
-        if (currentTime - lastCheckTime < 800) return // 稍微调小一点
+        if (currentTime - lastCheckTime < 800) {
+           // sendDebugNotification("触发过快，已忽略 (间隔 < 800ms)") // 太过频繁，建议注释掉，否则可能刷屏
+           return 
+        }
 
         scope.launch {
             try {
@@ -135,6 +149,7 @@ class ClipboardMonitorService : AccessibilityService() {
                     if (text != lastForegroundSeenText) {
                         Log.d(TAG, "checkClipboard: App in foreground, link detected but skipping auto-trigger: $text")
                         lastForegroundSeenText = text
+                        sendDebugNotification("App 在前台，忽略剪贴板内容")
                     }
                     return@launch
                 }
@@ -149,14 +164,17 @@ class ClipboardMonitorService : AccessibilityService() {
                 val url = UrlUtils.extractFirstUrl(text)
                 if (url == null) {
                     Log.v(TAG, "checkClipboard: No URL found in background text")
+                    sendDebugNotification("未检测到有效链接")
                     return@launch
                 }
 
                 if (UrlUtils.isXhsLink(url)) {
                     Log.d(TAG, "checkClipboard: FOUND XHS LINK, starting download: $url")
+                    // 成功开始下载，不需要调试通知，会有正式下载通知
                     BackgroundDownloadManager.startDownload(applicationContext, url, text)
                 } else {
                     Log.v(TAG, "checkClipboard: Not an XHS link in background")
+                    sendDebugNotification("检测到链接但非小红书: $url")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "checkClipboard error", e)
