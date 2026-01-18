@@ -21,7 +21,11 @@ class XHSApplication : Application() {
                 Log.d("XHSApplication", "onActivityStarted: ${activity.javaClass.simpleName}, count=$runningActivities")
                 if (runningActivities == 1) {
                     isAppInForeground = true
-                    // Log.d("XHSApplication", "App enters foreground")
+                    NotificationHelper.showDiagnosticNotification(
+                        this@XHSApplication,
+                        "监控状态", // 统一标题
+                        "App 在前台，下载器保持静默" // 统一文案
+                    )
                 }
             }
             override fun onActivityResumed(activity: Activity) {}
@@ -32,7 +36,11 @@ class XHSApplication : Application() {
                 if (runningActivities <= 0) {
                     runningActivities = 0
                     isAppInForeground = false
-                    // Log.d("XHSApplication", "App enters background")
+                    NotificationHelper.showDiagnosticNotification(
+                        this@XHSApplication,
+                        "监控状态", // 统一标题
+                        "App 在后台，自动下载待命" // 统一文案
+                    )
                 }
             }
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}

@@ -14,8 +14,9 @@ object NotificationHelper {
     private const val CHANNEL_ID = "xhs_download_channel_v2"
     private const val DIAGNOSTIC_CHANNEL_ID = "xhs_diagnostic_channel"
     private const val DOWNLOAD_GROUP = "com.neoruaa.xhsdn.DOWNLOAD_GROUP"
+    const val MONITOR_STATUS_ID = 1001 // 固定 ID，确保所有监控状态通知使用同一个槽位
 
-    fun showDiagnosticNotification(context: Context, title: String, content: String) {
+    fun showDiagnosticNotification(context: Context, title: String, content: String, id: Int = MONITOR_STATUS_ID) {
         val appContext = context.applicationContext
         createDiagnosticChannel(appContext)
         val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -27,8 +28,9 @@ object NotificationHelper {
             .setPriority(NotificationCompat.PRIORITY_LOW) // Diagnostic is low priority to not disturb too much
             .setAutoCancel(true)
             .setGroup("diagnostic")
+            .setOnlyAlertOnce(true) // 防止频繁更新时一直震动/响铃
 
-        notificationManager.notify(title.hashCode(), builder.build())
+        notificationManager.notify(id, builder.build())
     }
 
     fun showDownloadNotification(context: Context, id: Int, title: String, content: String, ongoing: Boolean, showProgress: Boolean = true) {
