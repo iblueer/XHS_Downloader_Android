@@ -110,10 +110,7 @@ class ClipboardMonitorService : AccessibilityService() {
 
         // 节流：防止短时间内被大量无意义事件淹没
         val currentTime = System.currentTimeMillis()
-        if (currentTime - lastCheckTime < 800) {
-           // sendDebugNotification("触发过快，已忽略 (间隔 < 800ms)") // 太过频繁，建议注释掉，否则可能刷屏
-           return 
-        }
+        if (currentTime - lastCheckTime < 800) return 
 
         scope.launch {
             try {
@@ -125,9 +122,21 @@ class ClipboardMonitorService : AccessibilityService() {
                 for (attempt in 1..3) {
                     delay(300)
                     val clipboard = clipboardManager ?: (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                    if (!clipboard.hasPrimaryClip()) continue
                     
-                    val currentText = clipboard.primaryClip?.getItemAt(0)?.text?.toString() ?: ""
+                    // 注意：在部分高版本 Android 或模拟器上，后台服务可能无法访问剪贴板
+                    // 如果 hasPrimaryClip 返回 false，通常意味着被系统拦截
+                    if (!clipboard.hasPrimaryClip()) {
+                        if (attempt == 3) { // 只在最后一次重试失败时通知
+                            Log.e(TAG, "checkClipboard: hasPrimaryClip() returned false after 3 attempts")
+                            sendDebugNotification("系统拒绝访问剪贴板 (可能有后台限制)")
+                        }
+                        continue
+                    }
+                    
+                    val clipData = clipboard.primaryClip
+                    val item = clipData?.getItemAt(0)
+                    val currentText = item?.text?.toString() ?: ""
+                    
                     if (currentText.isNotEmpty() && currentText != lastCheckedClipText) {
                         text = currentText
                         foundNew = true
