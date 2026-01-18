@@ -120,6 +120,8 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
             createLivePhotos = createLivePhotos,
             useCustomNaming = useCustomNaming,
             template = TextFieldValue(template),
+            tokens = NamingFormat.getAvailableTokens(),
+            autoViewProgress = autoViewProgress,
             debugNotificationEnabled = debugNotificationEnabled,
             showClipboardBubble = showClipboardBubble
         )
