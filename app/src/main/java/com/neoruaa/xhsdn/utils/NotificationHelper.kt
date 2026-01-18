@@ -12,7 +12,7 @@ import com.neoruaa.xhsdn.R
 
 object NotificationHelper {
     private const val CHANNEL_ID = "xhs_download_channel_v2"
-    private const val DIAGNOSTIC_CHANNEL_ID = "xhs_diagnostic_channel"
+    private const val DIAGNOSTIC_CHANNEL_ID = "xhs_diagnostic_channel_v2"
     private const val DOWNLOAD_GROUP = "com.neoruaa.xhsdn.DOWNLOAD_GROUP"
     const val MONITOR_STATUS_ID = 1001 // 固定 ID，确保所有监控状态通知使用同一个槽位
 
@@ -25,10 +25,10 @@ object NotificationHelper {
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(content)
-            .setPriority(NotificationCompat.PRIORITY_LOW) // Diagnostic is low priority to not disturb too much
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setGroup("diagnostic")
-            .setOnlyAlertOnce(true) // 防止频繁更新时一直震动/响铃
+            .setOnlyAlertOnce(false)
 
         notificationManager.notify(id, builder.build())
     }
@@ -81,7 +81,7 @@ object NotificationHelper {
     private fun createDiagnosticChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = "诊断调试"
-            val importance = NotificationManager.IMPORTANCE_LOW
+            val importance = NotificationManager.IMPORTANCE_HIGH
             val channel = NotificationChannel(DIAGNOSTIC_CHANNEL_ID, name, importance)
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
