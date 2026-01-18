@@ -118,6 +118,10 @@ import top.yukonga.miuix.kmp.icon.icons.basic.SearchCleanup
 import top.yukonga.miuix.kmp.icon.icons.useful.Edit
 import androidx.compose.foundation.combinedClickable
 import java.io.File
+import android.util.LruCache
+
+// 缩略图内存缓存（最多缓存 50 张缩略图）
+private val thumbnailCache = object : LruCache<String, ImageBitmap>(50) {}
 
 class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -1381,17 +1385,30 @@ private fun PlaceholderMedia(
 
 @Composable
 private fun rememberThumbnail(item: MediaItem): ImageBitmap? {
+    // 先检查缓存
+    val cachedBitmap = thumbnailCache.get(item.path)
+    if (cachedBitmap != null) {
+        return cachedBitmap
+    }
+    
     val state = produceState<ImageBitmap?>(initialValue = null, key1 = item.path) {
         value = withContext(Dispatchers.IO) {
+            // 再次检查缓存（可能在等待期间被其他协程加载）
+            thumbnailCache.get(item.path)?.let { return@withContext it }
+            
             val file = File(item.path)
             if (!file.exists()) return@withContext null
-            runCatching {
+            val bitmap = runCatching {
                 when (item.type) {
                     MediaType.IMAGE -> decodeSampledBitmap(file.path, 720, 720)?.asImageBitmap()
                     MediaType.VIDEO -> createVideoThumbnail(file)?.asImageBitmap()
                     MediaType.OTHER -> null
                 }
             }.getOrNull()
+            
+            // 存入缓存
+            bitmap?.let { thumbnailCache.put(item.path, it) }
+            bitmap
         }
     }
     return state.value
