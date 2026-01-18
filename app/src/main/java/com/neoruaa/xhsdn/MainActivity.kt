@@ -890,8 +890,44 @@ private fun HistoryPage(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
+            // 筛选标签栏
+            var selectedFilter by remember { mutableStateOf(0) }
+            val filterLabels = listOf("全部", "等待选择", "失败")
             
-            if (tasks.isEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                filterLabels.forEachIndexed { index, label ->
+                    val isSelected = selectedFilter == index
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                if (isSelected) MiuixTheme.colorScheme.primary
+                                else MiuixTheme.colorScheme.surfaceVariant
+                            )
+                            .clickable { selectedFilter = index }
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 13.sp,
+                            color = if (isSelected) Color.White else MiuixTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+            
+            // 根据筛选条件过滤任务
+            val filteredTasks = when (selectedFilter) {
+                1 -> tasks.filter { it.status == com.neoruaa.xhsdn.data.TaskStatus.WAITING_FOR_USER }
+                2 -> tasks.filter { it.status == com.neoruaa.xhsdn.data.TaskStatus.FAILED }
+                else -> tasks
+            }
+            if (filteredTasks.isEmpty()) {
                 // 空状态
                 Column(
                     modifier = Modifier
@@ -914,8 +950,8 @@ private fun HistoryPage(
                     )
                 }
             } else {
-                LaunchedEffect(tasks.size) {
-                    if (tasks.isNotEmpty()) {
+                LaunchedEffect(filteredTasks.size) {
+                    if (filteredTasks.isNotEmpty()) {
                         statusListState.animateScrollToItem(0)
                     }
                 }
@@ -930,7 +966,7 @@ private fun HistoryPage(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
+                    itemsIndexed(filteredTasks, key = { _, task -> task.id }) { index, task ->
                         TaskCell(
                             task = task,
                             // 只有最后一个任务（列表第一个，因为按时间降序）显示缩略图
