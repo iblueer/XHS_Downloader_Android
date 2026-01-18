@@ -524,6 +524,7 @@ class MainActivity : ComponentActivity() {
             val taskId = data.getLongExtra("task_id", -1L).takeIf { it > 0 }
             if (urls.isNotEmpty()) {
                 switchToLogsTab?.invoke()
+                showToast("开始爬取，请等待任务完成")
                 viewModel.onWebCrawlResult(urls, content, taskId)
             } else {
                 showToast("未发现可下载的资源")
@@ -980,10 +981,10 @@ private fun HistoryPage(
                     itemsIndexed(filteredTasks, key = { _, task -> task.id }) { index, task ->
                         TaskCell(
                             task = task,
-                            // 只有最后一个任务（列表第一个，因为按时间降序）显示缩略图
+                            // 只有正在下载的任务才使用 uiState.mediaItems
                             mediaItems = if (task.filePaths.isNotEmpty()) {
                                 task.filePaths.map { MediaItem(it, detectMediaType(it)) }
-                            } else if (index == 0 && uiState.mediaItems.isNotEmpty()) {
+                            } else if (task.status == com.neoruaa.xhsdn.data.TaskStatus.DOWNLOADING && uiState.mediaItems.isNotEmpty()) {
                                 uiState.mediaItems
                             } else {
                                 emptyList()

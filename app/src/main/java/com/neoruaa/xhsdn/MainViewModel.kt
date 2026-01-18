@@ -479,8 +479,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             appendStatus("网页未发现可下载的资源")
             return
         }
+
+        // Filter duplicate videos logic
+        // 1. Separate videos and images
+        // Helper to check if URL is a video
+        fun isVideo(url: String): Boolean {
+            return url.contains(".mp4") || 
+                   url.contains("sns-video") || 
+                   url.contains("blob:")
+        }
+
+        val (videoUrls, imageUrls) = urls.partition { isVideo(it) }
+        
+        // 2. Deduplicate videos (Prioritize HD from sns-video-bd.xhscdn.com)
+        // Since xhs_extractor.js pushes the main video (originVideoKey) first,
+        // we can safely prioritize the first video that matches our quality criteria.
+        val finalVideoUrls = if (videoUrls.size > 1) {
+            val hdVideos = videoUrls.filter { it.contains("sns-video") } // Broadened check
+            if (hdVideos.isNotEmpty()) {
+                // Determine valid HD videos
+                val distinctHd = hdVideos.distinct()
+                
+                // User requirement: Keep only the highest quality one.
+                // Assuming the first one (from originVideoKey) is the best.
+                listOf(distinctHd.first()) 
+            } else {
+                // No HD videos found, keep the first available video to avoid duplicates
+                listOf(videoUrls.distinct().first())
+            }
+        } else {
+            videoUrls // 0 or 1 video, just keep it
+        }
+
+        // 3. Combine and deduplicate everything
+        val finalUrls = (imageUrls + finalVideoUrls).distinct()
+        
+        if (finalUrls.isEmpty()) {
+             appendStatus("过滤后未发现有效资源")
+             return
+        }
+
         downloadedCount = 0
-        totalMediaCount = urls.size
+        totalMediaCount = finalUrls.size
 
         // Reset download tracking variables for web crawl
         resetDownloadTracking()
@@ -492,14 +532,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 progress = 0f,
                 showWebCrawl = false,
                 showVideoWarning = false
-            )
+        )
         }
         updateProgress()
-        content?.takeIf { it.isNotEmpty() }?.let {
-            appendStatus("已复制网页文案")
-            copyToClipboard(it)
-        }
-        appendStatus("网页模式发现 ${urls.size} 条资源，正在转存...")
+        appendStatus("开始爬取，请等待任务完成")
         viewModelScope.launch(Dispatchers.IO) {
             val downloader = XHSDownloader(
                 getApplication(),
@@ -594,7 +630,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val postIdTemp: String = url?.let { downloader.extractPostId(it.firstOrNull()) } ?: currentDownloadStartTime.toString()
             val postId = "webview_$postIdTemp"
             try {
-                urls.forEachIndexed { index, rawUrl ->
+                finalUrls.forEachIndexed { index, rawUrl ->
                     val transformed = downloader.transformXhsCdnUrl(rawUrl).takeUnless { it.isNullOrEmpty() } ?: rawUrl
                     val extension = determineFileExtension(transformed)
                     val fileName = "${postId}_${index + 1}.$extension"

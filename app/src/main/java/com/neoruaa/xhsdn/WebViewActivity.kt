@@ -399,12 +399,7 @@ private fun extractImages(
                     }
                 }
 
-                if (contentObj != null) {
-                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    val clip = android.content.ClipData.newPlainText("Content", contentText)
-                    clipboard.setPrimaryClip(clip)
-                    Toast.makeText(context, context.getString(R.string.desc_copied), Toast.LENGTH_SHORT).show()
-                }
+                // Removed clipboard copy logic as per user request
 
                 // Merge extracted URLs with sniffed URLs
                 allUrls.addAll(sniffedUrls)
