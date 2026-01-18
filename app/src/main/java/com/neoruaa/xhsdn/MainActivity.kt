@@ -385,7 +385,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onWebCrawlTask = { task ->
                         viewModel.updateUrl(task.noteUrl)
-                        launchWebView(task.noteUrl)
+                        launchWebView(task.noteUrl, task.id)
                     },
                     onStopTask = { task ->
                          if (viewModel.currentTaskId == task.id) {
@@ -408,7 +408,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun launchWebView(input: String) {
+    private fun launchWebView(input: String, taskId: Long? = null) {
         val cleanUrl = UrlUtils.extractFirstUrl(input)
         if (cleanUrl == null) {
             showToast("未找到有效链接，请重新输入")
@@ -417,6 +417,9 @@ class MainActivity : ComponentActivity() {
         viewModel.resetWebCrawlFlag()
         val intent = Intent(this, WebViewActivity::class.java)
         intent.putExtra("url", cleanUrl)
+        if (taskId != null && taskId > 0) {
+            intent.putExtra("task_id", taskId)
+        }
         startActivityForResult(intent, WEBVIEW_REQUEST_CODE)
     }
 
@@ -515,9 +518,10 @@ class MainActivity : ComponentActivity() {
         if (requestCode == WEBVIEW_REQUEST_CODE && resultCode == RESULT_OK && data != null) {
             val urls = data.getStringArrayListExtra("image_urls") ?: emptyList()
             val content = data.getStringExtra("content_text")
+            val taskId = data.getLongExtra("task_id", -1L).takeIf { it > 0 }
             if (urls.isNotEmpty()) {
                 switchToLogsTab?.invoke()
-                viewModel.onWebCrawlResult(urls, content)
+                viewModel.onWebCrawlResult(urls, content, taskId)
             } else {
                 showToast("未发现可下载的资源")
             }

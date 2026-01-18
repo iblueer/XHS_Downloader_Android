@@ -354,7 +354,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun onWebCrawlResult(urls: List<String>, content: String?) {
+    fun onWebCrawlResult(urls: List<String>, content: String?, taskId: Long? = null) {
         if (urls.isEmpty()) {
             appendStatus("网页未发现可下载的资源")
             return
@@ -391,6 +391,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 downloadedCount++
                                 currentFileProgress = 0f // Reset current file progress when file is completed
                                 updateProgress()
+                                // If we have a taskId, add the file path to that task
+                                taskId?.let { id ->
+                                    TaskManager.addFilePath(id, filePath)
+                                }
                             }
                         }
                     }
@@ -478,10 +482,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) {
                     updateProgress()
                     appendStatus("网页转存完成")
+                    // Mark task as complete if taskId was provided
+                    taskId?.let { id ->
+                        TaskManager.completeTask(id, true)
+                    }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     appendStatus("网页转存出错: ${e.message}")
+                    // Mark task as failed if taskId was provided
+                    taskId?.let { id ->
+                        TaskManager.completeTask(id, false, "网页转存出错: ${e.message}")
+                    }
                 }
             } finally {
                 withContext(Dispatchers.Main) {

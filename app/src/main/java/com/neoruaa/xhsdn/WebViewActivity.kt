@@ -86,6 +86,8 @@ class WebViewActivity : ComponentActivity() {
         WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightNavigationBars = !isNightMode
 
         val initialUrl = intent?.getStringExtra("url")
+        val taskId = intent?.getLongExtra("task_id", -1L) ?: -1L
+        
         setContent {
             val controller = ThemeController(ColorSchemeMode.System)
             MiuixTheme(controller = controller) {
@@ -97,6 +99,9 @@ class WebViewActivity : ComponentActivity() {
                             putStringArrayListExtra("image_urls", ArrayList(urls))
                             if (content.isNotEmpty()) {
                                 putExtra("content_text", content)
+                            }
+                            if (taskId > 0) {
+                                putExtra("task_id", taskId)
                             }
                         }
                         setResult(Activity.RESULT_OK, resultIntent)
