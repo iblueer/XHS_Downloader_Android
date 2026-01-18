@@ -170,28 +170,131 @@ class MainActivity : ComponentActivity() {
             val clipboardMonitorEnabled = prefs.getBoolean("clipboard_monitor_enabled", false)
             var detectedXhsLink by remember { mutableStateOf<String?>(null) }
             
-            // 周期性检测剪贴板中的小红书链接（前台时每2秒检测一次）
-            LaunchedEffect(selectedTab, clipboardMonitorEnabled) {
-                if (selectedTab == 0 && clipboardMonitorEnabled) {
-                    while (true) {
-                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
-                        val url = clipText?.let { UrlUtils.extractFirstUrl(it) }
-                        if (UrlUtils.isXhsLink(url)) {
-                            detectedXhsLink = clipText
+            // 自动读取配置
+            var isAutoReadClipboardEnabled by remember { 
+                mutableStateOf(prefs.getBoolean("auto_read_clipboard", false)) 
+            }
+            
+            // 监听生命周期 ON_RESUME 和 ON_PAUSE 进行剪贴板监听器管理
+            val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
+            // 提取核心检测逻辑为可复用函数
+            fun checkClipboard() {
+                // 1. Refresh Preferences
+                val currentAutoRead = prefs.getBoolean("auto_read_clipboard", false)
+                val currentShowBubble = prefs.getBoolean("show_clipboard_bubble", true)
+                isAutoReadClipboardEnabled = currentAutoRead // Sync local state
+                
+                android.util.Log.d("XHS_Debug", "checkClipboard: AutoRead=$currentAutoRead, ShowBubble=$currentShowBubble")
+
+                // 2. Access Clipboard
+                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                if (clipboard.hasPrimaryClip()) {
+                    val clipData = clipboard.primaryClip
+                    if (clipData != null && clipData.itemCount > 0) {
+                        val clipText = clipData.getItemAt(0).text?.toString() ?: ""
+                        android.util.Log.d("XHS_Debug", "ClipText: $clipText")
+                        
+                        val url = UrlUtils.extractFirstUrl(clipText)
+                        android.util.Log.d("XHS_Debug", "Extracted URL: $url")
+                        
+                        if (url != null && UrlUtils.isXhsLink(url)) {
+                            // 3. Logic Branching
+                            
+                            if (currentAutoRead) {
+                                // A. Auto Download Priority
+                                viewModel.updateUrl(clipText)
+                                
+                                // ... (Auto download logic)
+                                android.util.Log.d("XHS_Debug", "Triggering Auto Download")
+                                
+                                // Trigger Download
+                                val autoViewProgress = prefs.getBoolean("auto_view_progress", true)
+                                if (autoViewProgress) {
+                                    selectedTab = 1
+                                }
+                                viewModel.startDownload { showToast(it) }
+                                
+                                // Show Notification with Full Content
+                                com.neoruaa.xhsdn.utils.NotificationHelper.showDownloadNotification(
+                                    context, 
+                                    System.currentTimeMillis().toInt(), 
+                                    "开始下载",
+                                    clipText, // Full content
+                                    false
+                                )
+                                
+                                // Clear Clipboard
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+                                
+                                // Ensure bubble is dismissed
+                                detectedXhsLink = null
+                                
+                            } else if (currentShowBubble) {
+                                // B. Show Bubble
+                                android.util.Log.d("XHS_Debug", "Showing Bubble")
+                                detectedXhsLink = clipText 
+                            } else {
+                                android.util.Log.d("XHS_Debug", "Bubble disabled in settings")
+                            }
                         } else {
+                            // Link invalid or not detected -> Disappear
+                            android.util.Log.d("XHS_Debug", "Not XHS link or null -> Hide Bubble")
                             detectedXhsLink = null
                         }
-                        kotlinx.coroutines.delay(2000)  // 每2秒检测一次
+                    } else {
+                        // Clipboard empty -> Disappear
+                        android.util.Log.d("XHS_Debug", "Clipboard empty/null data -> Hide Bubble")
+                        detectedXhsLink = null
                     }
                 } else {
+                    // No clipboard -> Disappear
+                    android.util.Log.d("XHS_Debug", "No Primary Clip -> Hide Bubble")
                     detectedXhsLink = null
+                }
+            }
+            
+            val scope = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycleScope
+            
+            val clipboardListener = remember {
+                android.content.ClipboardManager.OnPrimaryClipChangedListener {
+                     // 延迟检测，解决 listener 触发时 ClipData 可能尚未准备好的问题
+                     scope.launch {
+                         kotlinx.coroutines.delay(300) // 300ms 延迟
+                         checkClipboard()
+                     }
+                }
+            }
+
+            DisposableEffect(lifecycleOwner) {
+                val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                    if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                        // 注册监听器
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.addPrimaryClipChangedListener(clipboardListener)
+                        // 延迟检测：Android 10+ 需要等待窗口焦点才能访问剪贴板
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            checkClipboard()
+                        }
+                    } else if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+                        // 移除监听器
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.removePrimaryClipChangedListener(clipboardListener)
+                    }
+                }
+                lifecycleOwner.lifecycle.addObserver(observer)
+                onDispose {
+                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.removePrimaryClipChangedListener(clipboardListener)
+                    lifecycleOwner.lifecycle.removeObserver(observer)
                 }
             }
 
             MiuixTheme(controller = controller) {
                 MainScreen(
                     uiState = uiState,
+                    scrollBehavior = scrollBehavior,
                     onUrlChange = viewModel::updateUrl,
                     onDownload = {
                         ensureStoragePermission {
@@ -208,6 +311,8 @@ class MainActivity : ComponentActivity() {
                                     selectedTab = 1
                                 }
                                 viewModel.startDownload { showToast(it) }
+                                // 手动下载也清空剪贴板
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
                             } else {
                                 showToast("剪贴板中未检测到小红书链接")
                             }
@@ -230,7 +335,14 @@ class MainActivity : ComponentActivity() {
                         if (clipText.isNotEmpty()) {
                             viewModel.updateUrl(clipText)
                         }
-                        launchWebView(viewModel.uiState.value.urlInput) 
+                        ensureStoragePermission {
+                             // Clear clipboard on manual download start to prevent repeated prompts
+                             if (clipText.isNotEmpty()) {
+                                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", ""))
+                                 detectedXhsLink = null // Dismiss bubble if shown
+                             }
+                             viewModel.startDownload { showToast(it) }
+                        } 
                     },
                     onContinueDownload = { viewModel.continueAfterVideoWarning() },
                     onMediaClick = { openFile(it) },
@@ -283,10 +395,14 @@ class MainActivity : ComponentActivity() {
                     },
                     selectedTab = selectedTab,
                     onTabChange = { selectedTab = it },
-                    scrollBehavior = scrollBehavior,
                     versionLabel = "v${BuildConfig.VERSION_NAME}",
                     detectedXhsLink = detectedXhsLink,
-                    onDismissPrompt = { detectedXhsLink = null }
+                    onDismissPrompt = { detectedXhsLink = null },
+                    isAutoReadEnabled = isAutoReadClipboardEnabled,
+                    onAutoReadChange = { enabled ->
+                         isAutoReadClipboardEnabled = enabled
+                         prefs.edit().putBoolean("auto_read_clipboard", enabled).apply()
+                    }
                 )
             }
         }
@@ -437,7 +553,9 @@ private fun MainScreen(
     scrollBehavior: ScrollBehavior,
     versionLabel: String,
     detectedXhsLink: String?,
-    onDismissPrompt: () -> Unit
+    onDismissPrompt: () -> Unit,
+    isAutoReadEnabled: Boolean,
+    onAutoReadChange: (Boolean) -> Unit
     ) {
     val statusListState = rememberLazyListState()
 
@@ -483,6 +601,8 @@ private fun MainScreen(
                 onOpenWeb = onOpenWeb,
                 detectedXhsLink = detectedXhsLink,
                 onDismissPrompt = onDismissPrompt,
+                isAutoReadEnabled = isAutoReadEnabled,
+                onAutoReadChange = onAutoReadChange,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -517,6 +637,8 @@ private fun DownloadPage(
     onOpenWeb: () -> Unit,
     detectedXhsLink: String? = null,
     onDismissPrompt: () -> Unit = {},
+    isAutoReadEnabled: Boolean,
+    onAutoReadChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -602,6 +724,25 @@ private fun DownloadPage(
                     onClick = onOpenWeb,
                     modifier = Modifier.weight(1f),
                     enabled = !uiState.isDownloading
+                )
+            }
+            
+            // 底部复选框：自动读取剪贴板
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clickable { onAutoReadChange(!isAutoReadEnabled) }
+                    .padding(8.dp)
+            ) {
+                top.yukonga.miuix.kmp.basic.Checkbox(
+                    checked = isAutoReadEnabled,
+                    onCheckedChange = null // Handled by Row click
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = "自动读取剪贴板并下载",
+                    fontSize = 14.sp,
+                    color = MiuixTheme.colorScheme.onSurface
                 )
             }
         }

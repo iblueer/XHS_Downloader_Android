@@ -18,6 +18,13 @@ object NotificationHelper {
 
     fun showDiagnosticNotification(context: Context, title: String, content: String, id: Int = MONITOR_STATUS_ID) {
         val appContext = context.applicationContext
+        val prefs = appContext.getSharedPreferences("XHSDownloaderPrefs", Context.MODE_PRIVATE)
+        val isDebugEnabled = prefs.getBoolean("debug_notification_enabled", false)
+
+        if (!isDebugEnabled) {
+            return
+        }
+
         createDiagnosticChannel(appContext)
         val notificationManager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 

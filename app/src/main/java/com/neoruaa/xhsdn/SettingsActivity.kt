@@ -93,11 +93,9 @@ data class SettingsUiState(
     val useCustomNaming: Boolean = false,
     val template: TextFieldValue = TextFieldValue(NamingFormat.DEFAULT_TEMPLATE),
     val tokens: List<NamingFormat.TokenDefinition> = emptyList(),
-    val clipboardMonitorEnabled: Boolean = false,
-    val autoViewProgress: Boolean = true,  // 默认开启自动查看下载进度
-    val autoDownloadEnabled: Boolean = false, // 自动下载模式
-    val debugNotificationEnabled: Boolean = false, // 详细调试通知
-    val isAccessibilityServiceEnabled: Boolean = false // 无障碍服务状态
+    val autoViewProgress: Boolean = true,
+    val debugNotificationEnabled: Boolean = false,
+    val showClipboardBubble: Boolean = true
 )
 
 class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
@@ -114,37 +112,20 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
         if (template.isNullOrEmpty()) {
             template = NamingFormat.DEFAULT_TEMPLATE
         }
-        val clipboardMonitorEnabled = prefs.getBoolean("clipboard_monitor_enabled", false)
         val autoViewProgress = prefs.getBoolean("auto_view_progress", true)  // 默认开启
         val autoDownloadEnabled = prefs.getBoolean("auto_download_enabled", false)
         val debugNotificationEnabled = prefs.getBoolean("debug_notification_enabled", false)
+        val showClipboardBubble = prefs.getBoolean("show_clipboard_bubble", true) // Default true
         return SettingsUiState(
             createLivePhotos = createLivePhotos,
             useCustomNaming = useCustomNaming,
             template = TextFieldValue(template),
-            tokens = NamingFormat.getAvailableTokens(),
-            clipboardMonitorEnabled = clipboardMonitorEnabled,
-            autoViewProgress = autoViewProgress,
-            autoDownloadEnabled = autoDownloadEnabled,
-            debugNotificationEnabled = debugNotificationEnabled
+            debugNotificationEnabled = debugNotificationEnabled,
+            showClipboardBubble = showClipboardBubble
         )
     }
 
-    fun updateAccessibilityState(enabled: Boolean) = updateState {
-        it.copy(isAccessibilityServiceEnabled = enabled)
-    }
 
-    fun onAutoDownloadChange(enabled: Boolean) = updateState {
-        it.copy(autoDownloadEnabled = enabled).also { newState ->
-            persist(newState)
-        }
-    }
-
-    fun onDebugNotificationChange(enabled: Boolean) = updateState {
-        it.copy(debugNotificationEnabled = enabled).also { newState ->
-            persist(newState)
-        }
-    }
 
     fun onCreateLivePhotosChange(enabled: Boolean) = updateState {
         it.copy(createLivePhotos = enabled).also { newState ->
@@ -170,14 +151,22 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
         }
     }
 
-    fun onClipboardMonitorChange(enabled: Boolean) = updateState {
-        it.copy(clipboardMonitorEnabled = enabled).also { newState ->
+
+
+    fun onAutoViewProgressChange(enabled: Boolean) = updateState {
+        it.copy(autoViewProgress = enabled).also { newState ->
             persist(newState)
         }
     }
 
-    fun onAutoViewProgressChange(enabled: Boolean) = updateState {
-        it.copy(autoViewProgress = enabled).also { newState ->
+    fun onDebugNotificationChange(enabled: Boolean) = updateState {
+        it.copy(debugNotificationEnabled = enabled).also { newState ->
+            persist(newState)
+        }
+    }
+
+    fun onShowClipboardBubbleChange(enabled: Boolean) = updateState {
+        it.copy(showClipboardBubble = enabled).also { newState ->
             persist(newState)
         }
     }
@@ -188,10 +177,9 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
             .putBoolean("create_live_photos", state.createLivePhotos)
             .putBoolean("use_custom_naming_format", state.useCustomNaming)
             .putString("custom_naming_template", state.template.text.ifBlank { NamingFormat.DEFAULT_TEMPLATE })
-            .putBoolean("clipboard_monitor_enabled", state.clipboardMonitorEnabled)
             .putBoolean("auto_view_progress", state.autoViewProgress)
-            .putBoolean("auto_download_enabled", state.autoDownloadEnabled)
             .putBoolean("debug_notification_enabled", state.debugNotificationEnabled)
+            .putBoolean("show_clipboard_bubble", state.showClipboardBubble)
             .remove("use_metadata_file_names")
             .apply()
     }
@@ -255,14 +243,10 @@ class SettingsActivity : ComponentActivity() {
                     onUseCustomNamingChange = viewModel::onUseCustomNamingChange,
                     onTemplateChange = viewModel::onTemplateChange,
                     onResetTemplate = viewModel::onResetTemplate,
-                    onClipboardMonitorChange = viewModel::onClipboardMonitorChange,
                     onAutoViewProgressChange = viewModel::onAutoViewProgressChange,
-                    onAutoDownloadChange = viewModel::onAutoDownloadChange,
                     onDebugNotificationChange = viewModel::onDebugNotificationChange,
-                    onOpenAccessibilitySettings = {
-                        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                        startActivity(intent)
-                    },
+                    onShowClipboardBubbleChange = viewModel::onShowClipboardBubbleChange,
+
                     topBarState = topBarState
                 )
             }
@@ -275,26 +259,7 @@ class SettingsActivity : ComponentActivity() {
     }
     
     private fun checkAccessibilityState() {
-        val serviceClass = com.neoruaa.xhsdn.services.ClipboardMonitorService::class.java
-        val expectedComponentName = ComponentName(this, serviceClass)
-        val enabledServicesSetting = Settings.Secure.getString(
-            contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: ""
-        
-        val stringColonSplitter = TextUtils.SimpleStringSplitter(':')
-        stringColonSplitter.setString(enabledServicesSetting)
-        
-        var enabled = false
-        while (stringColonSplitter.hasNext()) {
-            val componentNameString = stringColonSplitter.next()
-            val enabledComponent = ComponentName.unflattenFromString(componentNameString)
-            if (enabledComponent != null && enabledComponent == expectedComponentName) {
-                enabled = true
-                break
-            }
-        }
-        viewModel.updateAccessibilityState(enabled)
+        // No-op
     }
 
     private fun finishWithResult() {
@@ -312,11 +277,9 @@ private fun SettingsScreen(
     onUseCustomNamingChange: (Boolean) -> Unit,
     onTemplateChange: (TextFieldValue) -> Unit,
     onResetTemplate: () -> Unit,
-    onClipboardMonitorChange: (Boolean) -> Unit,
     onAutoViewProgressChange: (Boolean) -> Unit,
-    onAutoDownloadChange: (Boolean) -> Unit,
     onDebugNotificationChange: (Boolean) -> Unit,
-    onOpenAccessibilitySettings: () -> Unit,
+    onShowClipboardBubbleChange: (Boolean) -> Unit,
     topBarState: top.yukonga.miuix.kmp.basic.TopAppBarState
 ) {
     val context = LocalContext.current
@@ -372,11 +335,18 @@ private fun SettingsScreen(
                             checked = uiState.autoViewProgress,
                             onCheckedChange = onAutoViewProgressChange
                         )
+                        PreferenceRow(
+                            title = "调试通知",
+                            description = "显示详细的下载调试信息",
+                            checked = uiState.debugNotificationEnabled,
+                            onCheckedChange = onDebugNotificationChange
+                        )
                     }
                 }
             }
+            
             item {
-                SmallTitle(text = "剪贴板监听")
+                SmallTitle(text = "剪贴板")
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -386,64 +356,15 @@ private fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         PreferenceRow(
-                            title = "剪贴板监听",
-                            description = "开启后将在前台检测剪贴板中的小红书链接",
-                            checked = uiState.clipboardMonitorEnabled,
-                            onCheckedChange = onClipboardMonitorChange
+                            title = "显示剪贴板气泡",
+                            description = "检测到链接时显示提示卡片",
+                            checked = uiState.showClipboardBubble,
+                            onCheckedChange = onShowClipboardBubbleChange
                         )
-
-                        PreferenceRow(
-                            title = "详细调试通知",
-                            description = "显示剪贴板监听的详细日志（如无效链接原因）",
-                            checked = uiState.debugNotificationEnabled,
-                            onCheckedChange = onDebugNotificationChange
-                        )
-                        
-                        if (uiState.clipboardMonitorEnabled) {
-                            PreferenceRow(
-                                title = "自动下载模式",
-                                description = "后台复制链接后自动下载并通知",
-                                checked = uiState.autoDownloadEnabled,
-                                onCheckedChange = onAutoDownloadChange
-                            )
-                            
-                            if (uiState.autoDownloadEnabled && !uiState.isAccessibilityServiceEnabled) {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceVariant)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = MiuixIcons.Useful.Info,
-                                            contentDescription = null,
-                                            tint = Color(0xFFFF9800),
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                        Spacer(modifier = Modifier.size(12.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(text = "需要开启无障碍服务", maxLines = 1)
-                                            Text(text = "系统限制，后台监听剪贴板需要该权限", color = Color.Gray)
-                                        }
-                                        Button(
-                                            onClick = onOpenAccessibilitySettings,
-                                            colors = ButtonDefaults.buttonColorsPrimary()
-                                        ) {
-                                            Text(
-                                                text = "前往开启", 
-                                                fontSize = 14.sp,
-                                                color = Color.White
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }
+            
             item {
                 SmallTitle(text = "文件命名")
                 Card(
