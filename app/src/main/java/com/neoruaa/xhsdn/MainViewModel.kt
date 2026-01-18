@@ -332,6 +332,126 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * 重试失败的任务（复用已有 taskId）
+     */
+    fun retryTask(task: com.neoruaa.xhsdn.data.DownloadTask, onError: (String) -> Unit) {
+        // 重置任务状态
+        TaskManager.resetTask(task.id)
+        currentTaskId = task.id
+        
+        val targetUrl = task.noteUrl
+        currentUrl = targetUrl
+        updateUrl(targetUrl)
+        
+        // Reset tracking
+        downloadedCount = 0
+        totalMediaCount = 0
+        taskCompletedFiles = 0
+        taskFailedFiles = 0
+        displayedFiles.clear()
+        resetDownloadTracking()
+        
+        _uiState.update {
+            it.copy(
+                isDownloading = true,
+                progressLabel = "",
+                progress = 0f,
+                showWebCrawl = false,
+                showVideoWarning = false,
+                mediaItems = emptyList()
+            )
+        }
+        
+        downloadJob = viewModelScope.launch(Dispatchers.IO) {
+            totalMediaCount = runCatching { XHSDownloader(getApplication()).getMediaCount(targetUrl) }
+                .getOrElse { 0 }
+            updateProgress()
+            
+            val myTaskId = task.id
+            
+            val downloader = XHSDownloader(
+                getApplication(),
+                object : DownloadCallback {
+                    override fun onFileDownloaded(filePath: String) {
+                        viewModelScope.launch(Dispatchers.Main) {
+                            if (displayedFiles.add(filePath)) {
+                                addMedia(filePath)
+                                downloadedCount++
+                                taskCompletedFiles++
+                                currentFileProgress = 0f 
+                                updateProgress()
+                                TaskManager.updateProgress(myTaskId, taskCompletedFiles, taskFailedFiles)
+                                TaskManager.addFilePath(myTaskId, filePath)
+                            }
+                        }
+                    }
+
+                    override fun onDownloadProgress(status: String) {
+                        appendStatus(status)
+                    }
+
+                    override fun onDownloadProgressUpdate(downloaded: Long, total: Long) {
+                        val progressPercent = if (total > 0) {
+                            (downloaded.toDouble() / total.toDouble() * 100).toFloat()
+                        } else 0f
+                        currentFileProgress = if (total > 0) downloaded.toFloat() / total.toFloat() else 0f
+                        updateProgress()
+                        val progressText = "${String.format("%.1f", progressPercent)}%｜$lastCalculatedSpeed"
+                        _uiState.update { currentState ->
+                            currentState.copy(downloadProgressText = progressText)
+                        }
+                    }
+
+                    override fun onDownloadError(status: String, originalUrl: String) {
+                        appendStatus("错误：$status ($originalUrl)")
+                        taskFailedFiles++
+                    }
+
+                    override fun onVideoDetected() {
+                        _uiState.update { it.copy(showVideoWarning = true) }
+                        TaskManager.updateTaskType(myTaskId, NoteType.VIDEO)
+                    }
+                }
+            )
+
+            downloader.setShouldStopOnVideo(true)
+            downloader.resetStopDownload()
+
+            try {
+                downloader.downloadContent(targetUrl)
+                withContext(Dispatchers.Main) {
+                    if (taskCompletedFiles > 0 || taskFailedFiles == 0) {
+                        TaskManager.completeTask(myTaskId, true)
+                    } else {
+                        TaskManager.completeTask(myTaskId, false, "下载过程出错")
+                    }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                withContext(Dispatchers.Main) {
+                    if (taskCompletedFiles == 0) {
+                        TaskManager.completeTask(myTaskId, false, "下载已取消")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    TaskManager.completeTask(myTaskId, false, e.message ?: "未知错误")
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    _uiState.update { it.copy(isDownloading = false, showVideoWarning = false) }
+                    resetDownloadTracking()
+                    if (currentTaskId == myTaskId) {
+                        currentTaskId = 0
+                    }
+                    taskCompletedFiles = 0
+                    taskFailedFiles = 0
+                    hasUserContinuedAfterVideoWarning = false
+                }
+            }
+        }
+    }
+
     fun copyDescription(onResult: (String) -> Unit, onError: (String) -> Unit) {
         val targetUrl = _uiState.value.urlInput.trim()
         if (targetUrl.isEmpty()) {
@@ -468,8 +588,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             // Reset the stop flag for new download
             downloader.resetStopDownload()
-            // Extract all valid XHS URLs from the input
-            val url: List<String>? = downloader.extractLinks(currentUrl)
+            // Extract all valid XHS URLs from the input - get URL from task if taskId provided
+            val sourceUrl = taskId?.let { TaskManager.getTaskById(it)?.noteUrl } ?: currentUrl
+            val url: List<String>? = sourceUrl?.let { downloader.extractLinks(it) }
             val postIdTemp: String = url?.let { downloader.extractPostId(it.firstOrNull()) } ?: currentDownloadStartTime.toString()
             val postId = "webview_$postIdTemp"
             try {

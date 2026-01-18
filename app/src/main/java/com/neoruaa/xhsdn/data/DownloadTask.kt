@@ -156,6 +156,13 @@ object TaskManager {
     }
     
     /**
+     * 根据 ID 获取任务
+     */
+    fun getTaskById(taskId: Long): DownloadTask? {
+        return _tasks.value.find { it.id == taskId }
+    }
+    
+    /**
      * 获取进行中的任务
      */
     fun getActiveTasks(): Flow<List<DownloadTask>> = _tasks.map {
@@ -287,6 +294,22 @@ object TaskManager {
      */
     fun updateTaskType(taskId: Long, noteType: NoteType) {
         updateTask(taskId) { it.copy(noteType = noteType) }
+    }
+
+    /**
+     * 重置任务以供重试（清空进度、文件、错误信息）
+     */
+    fun resetTask(taskId: Long) {
+        updateTask(taskId) { task ->
+            task.copy(
+                status = TaskStatus.DOWNLOADING,
+                completedFiles = 0,
+                failedFiles = 0,
+                filePaths = emptyList(),
+                errorMessage = null,
+                completedAt = null
+            )
+        }
     }
 
     /**

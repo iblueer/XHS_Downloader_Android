@@ -370,10 +370,9 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onRetryTask = { task ->
-                        viewModel.updateUrl(task.noteUrl)
                         ensureStoragePermission {
                             selectedTab = 1
-                            viewModel.startDownload { showToast(it) }
+                            viewModel.retryTask(task) { showToast(it) }
                         }
                     },
                     onDeleteTask = { task ->
@@ -1155,22 +1154,37 @@ private fun TaskCell(
                 
                 // 等待用户选择状态 (显示 坚持下载/网页爬取)
                 if (task.status == com.neoruaa.xhsdn.data.TaskStatus.WAITING_FOR_USER) {
-                    Button(
-                        onClick = onContinue,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColorsPrimary()
-                    ) {
-                        Text("坚持下载", color = Color.White)
-                    }
-                    Button(
-                        onClick = onWebCrawl,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            MiuixTheme.colorScheme.surface,
-                            MiuixTheme.colorScheme.onSurface
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // 提示语
+                        Text(
+                            text = "因官方限制，仅能下载低清版本。如需高清，选网页爬取。",
+                            fontSize = 12.sp,
+                            color = Color.Gray,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
-                    ) {
-                        Text("网页爬取", color = MiuixTheme.colorScheme.onSurface)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onContinue,
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColorsPrimary()
+                            ) {
+                                Text("坚持下载", color = Color.White)
+                            }
+                            Button(
+                                onClick = onWebCrawl,
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    MiuixTheme.colorScheme.surface,
+                                    MiuixTheme.colorScheme.onSurface
+                                )
+                            ) {
+                                Text("网页爬取", color = MiuixTheme.colorScheme.onSurface)
+                            }
+                        }
                     }
                 } else {
                     // 复制链接按钮
