@@ -71,12 +71,13 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.TopAppBarState
 import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.icons.useful.Refresh
-import top.yukonga.miuix.kmp.icon.icons.other.GitHub
-import top.yukonga.miuix.kmp.icon.icons.useful.Back
+import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
+import androidx.compose.ui.res.stringResource
+import top.yukonga.miuix.kmp.icon.extended.Refresh
+import top.yukonga.miuix.kmp.icon.extended.Update
 
 private const val PREFS_NAME = "XHSDownloaderPrefs"
 
@@ -233,10 +234,10 @@ private fun SettingsScreen(
             .union(androidx.compose.foundation.layout.WindowInsets.displayCutout),
         topBar = {
             TopAppBar(
-                title = context.getString(R.string.settings),
+                title = stringResource(R.string.settings),
                 navigationIcon = {
                     Icon(
-                        imageVector = MiuixIcons.Useful.Back,
+                        imageVector = MiuixIcons.Back,
                         contentDescription = "返回",
                         modifier = Modifier
                             .padding(start = 26.dp)
@@ -304,7 +305,7 @@ private fun SettingsScreen(
                             trailingIcon = {
                                 if (uiState.useCustomNaming) {
                                     Icon(
-                                        imageVector = MiuixIcons.Useful.Refresh,
+                                        imageVector = MiuixIcons.Refresh,
                                         contentDescription = "重置模板",
                                         modifier = Modifier
                                             .padding(end = 16.dp)
@@ -385,7 +386,7 @@ private fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp),
                         ) {
                             Icon(
-                                imageVector = MiuixIcons.Other.GitHub,
+                                imageVector = MiuixIcons.Update,
                                 contentDescription = "GitHub",
                                 modifier = Modifier.padding(end = 8.dp),
                                 tint = Color.White
@@ -468,7 +469,7 @@ private fun TokenChip(
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(text = LocalContext.current.getString(token.labelResId))
+            Text(text = stringResource(token.labelResId))
             Text(text = token.placeholder, color = Color.Gray)
         }
     }

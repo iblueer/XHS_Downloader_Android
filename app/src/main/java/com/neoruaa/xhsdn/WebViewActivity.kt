@@ -60,10 +60,11 @@ import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.icons.useful.Back
+import top.yukonga.miuix.kmp.icon.extended.Back
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
+import androidx.compose.ui.res.stringResource
 
 class WebViewActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
@@ -146,10 +147,10 @@ private fun WebViewScreen(
         contentWindowInsets = WindowInsets.statusBars.union(WindowInsets.displayCutout),
         topBar = {
             TopAppBar(
-                title = context.getString(R.string.webview_title),
+                title = stringResource(R.string.webview_title),
                 navigationIcon = {
                     Icon(
-                        imageVector = MiuixIcons.Useful.Back,
+                        imageVector = MiuixIcons.Back,
                         contentDescription = "返回",
                         modifier = Modifier
                             .padding(start = 26.dp)
@@ -180,7 +181,7 @@ private fun WebViewScreen(
                     value = urlText,
                     onValueChange = { urlText = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = context.getString(R.string.webview_enter_url),
+                    label = stringResource(R.string.webview_enter_url),
                     singleLine = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default.copy(imeAction = ImeAction.Go),
                     keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { loadUrl(webView, urlText.text) })
@@ -195,7 +196,7 @@ private fun WebViewScreen(
                         enabled = urlText.text.isNotBlank(),
                     ) {
                         Text(
-                            text = context.getString(R.string.webview_go)
+                            text = stringResource(R.string.webview_go)
                         )
                     }
                     Button(
@@ -207,7 +208,7 @@ private fun WebViewScreen(
                         colors = ButtonDefaults.buttonColorsPrimary()
                     ) {
                         Text(
-                            text = context.getString(R.string.webview_crawl),
+                            text = stringResource(R.string.webview_crawl),
                             color = Color.White
                         )
                     }
