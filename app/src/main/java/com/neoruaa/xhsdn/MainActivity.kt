@@ -100,6 +100,7 @@ import top.yukonga.miuix.kmp.theme.ThemeController
 import android.util.Size
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.width
+import com.kyant.capsule.ContinuousRoundedRectangle
 import top.yukonga.miuix.kmp.icon.basic.SearchCleanup
 import top.yukonga.miuix.kmp.icon.extended.Download
 import top.yukonga.miuix.kmp.icon.extended.Delete
@@ -404,11 +405,11 @@ private fun HomePage(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 TextField(
-                        value = uiState.urlInput,
-                        onValueChange = onUrlChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = "粘贴分享链接",
-                        useLabelAsPlaceholder = true,
+                    value = uiState.urlInput,
+                    onValueChange = onUrlChange,
+                    modifier = Modifier.fillMaxWidth().clip(ContinuousRoundedRectangle(16.dp)),
+                    label = "粘贴分享链接",
+                    useLabelAsPlaceholder = true,
                     trailingIcon = {
                         if (uiState.urlInput.isNotEmpty()) {
                             Icon(
@@ -663,7 +664,7 @@ private fun MediaPreview(item: MediaItem, onClick: () -> Unit, onDelete: (MediaI
 
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(18.dp))
+            .clip(ContinuousRoundedRectangle(18.dp))
             .background(MiuixTheme.colorScheme.surfaceVariant)
             .clickable { onClick() }
     ) {

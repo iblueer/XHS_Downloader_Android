@@ -65,6 +65,7 @@ import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 import androidx.compose.ui.res.stringResource
+import com.kyant.capsule.ContinuousRoundedRectangle
 
 class WebViewActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
@@ -180,7 +181,7 @@ private fun WebViewScreen(
                 TextField(
                     value = urlText,
                     onValueChange = { urlText = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().clip(ContinuousRoundedRectangle(16.dp)),
                     label = stringResource(R.string.webview_enter_url),
                     singleLine = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default.copy(imeAction = ImeAction.Go),
@@ -237,7 +238,7 @@ private fun WebViewScreen(
                         factory = { webView.apply { layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT) } },
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(18.dp)),
+                            .clip(ContinuousRoundedRectangle(18.dp)),
 
                         update = { }
                     )

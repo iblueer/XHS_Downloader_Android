@@ -42,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -76,6 +77,7 @@ import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 import androidx.compose.ui.res.stringResource
+import com.kyant.capsule.ContinuousRoundedRectangle
 import top.yukonga.miuix.kmp.icon.extended.Refresh
 import top.yukonga.miuix.kmp.icon.extended.Update
 
@@ -295,7 +297,7 @@ private fun SettingsScreen(
                         TextField(
                             value = uiState.template,
                             onValueChange = onTemplateChange,
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().clip(ContinuousRoundedRectangle(14.dp)),
                             label = "命名模板",
                             enabled = uiState.useCustomNaming,
                             singleLine = false,
@@ -314,6 +316,7 @@ private fun SettingsScreen(
                                     )
                                 }
                             },
+                            cornerRadius = 14.dp
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -384,6 +387,7 @@ private fun SettingsScreen(
                             },
                             colors = ButtonDefaults.buttonColorsPrimary(),
                             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp),
+                            cornerRadius = 18.dp
                         ) {
                             Icon(
                                 imageVector = MiuixIcons.Update,

@@ -57,6 +57,7 @@ dependencies {
 
     implementation "top.yukonga.miuix.kmp:miuix-android:0.8.0-rc06"
     implementation "top.yukonga.miuix.kmp:miuix-icons-android:0.8.0-rc06"
+    implementation "io.github.kyant0:capsule:2.1.2"
 
     implementation 'com.squareup.okhttp3:okhttp:5.3.2'
     testImplementation 'junit:junit:4.13.2'
