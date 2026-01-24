@@ -459,7 +459,12 @@ public class XHSDownloader {
     
     public List<String> extractLinks(String input) {
         List<String> urls = new ArrayList<>();
-        
+
+        // Check if input is null or empty
+        if (input == null || input.isEmpty()) {
+            return urls; // Return empty list if input is null or empty
+        }
+
         // 按空格分割输入，模仿原Python项目的逻辑
         String[] parts = input.split("\\s+");
         

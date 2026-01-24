@@ -417,8 +417,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Reset the stop flag for new download
             downloader.resetStopDownload()
             // Extract all valid XHS URLs from the input
-            val url: List<String>? = downloader.extractLinks(currentUrl)
-            val postIdTemp: String = url?.let { downloader.extractPostId(it.firstOrNull()) } ?: currentDownloadStartTime.toString()
+            val currentUrlValue = currentUrl ?: ""
+            val url: List<String>? = if (currentUrlValue.isNotEmpty()) {
+                downloader.extractLinks(currentUrlValue)
+            } else {
+                emptyList()
+            }
+            val postIdTemp: String = if (url != null && url.isNotEmpty()) {
+                downloader.extractPostId(url.firstOrNull()) ?: currentDownloadStartTime.toString()
+            } else {
+                currentDownloadStartTime.toString()
+            }
             val postId = "webview_$postIdTemp"
             urls.forEachIndexed { index, rawUrl ->
                 val transformed = downloader.transformXhsCdnUrl(rawUrl).takeUnless { it.isNullOrEmpty() } ?: rawUrl
