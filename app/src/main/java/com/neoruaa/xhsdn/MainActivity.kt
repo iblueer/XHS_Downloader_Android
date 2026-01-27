@@ -18,6 +18,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import com.neoruaa.xhsdn.utils.UrlUtils
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -48,8 +50,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.rememberScrollState
@@ -76,6 +76,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.core.app.ActivityCompat
@@ -519,99 +521,149 @@ private fun MainScreen(
 ) {
     val statusListState = rememberLazyListState()
     var menuExpanded by remember { mutableStateOf(false) }
+    var overflowButtonBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     val density = LocalDensity.current
+    val scrimInteraction = remember { MutableInteractionSource() }
+    val menuWidth = 180.dp
+    val menuWidthPx = with(density) { menuWidth.roundToPx() }
 
-    Scaffold(
-        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout),
-        topBar = {
-            val title = "小红书下载器"
-            TopAppBar(
-                title = title,
-                largeTitle = title,
-                scrollBehavior = scrollBehavior,
-                actions = {
-                    if (menuExpanded) {
-                        val xOffset = with(density) { (-12).dp.roundToPx() }
-                        val yOffset = with(density) { 56.dp.roundToPx() }
-                        Popup(
-                            alignment = Alignment.TopEnd,
-                            offset = IntOffset(xOffset, yOffset),
-                            onDismissRequest = { menuExpanded = false },
-                            properties = PopupProperties(focusable = true)
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout),
+            topBar = {
+                val title = "小红书下载器"
+                TopAppBar(
+                    title = title,
+                    largeTitle = title,
+                    scrollBehavior = scrollBehavior,
+                    actions = {
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .size(48.dp)
+                                .onGloballyPositioned { overflowButtonBounds = it.boundsInWindow() }
+                                .clickable { menuExpanded = !menuExpanded },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Card(
-                                cornerRadius = 18.dp,
-                                colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surface)
+                            Text(text = "···", fontSize = 20.sp)
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .padding(end = 26.dp)
+                                .size(48.dp)
+                                .clickable { onOpenSettings() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = MiuixIcons.Settings,
+                                contentDescription = "设置",
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                )
+            }
+        ) { padding ->
+            HistoryPage(
+                uiState = uiState,
+                statusListState = statusListState,
+                onDownload = onDownload,
+                onMediaClick = onMediaClick,
+                onCopyUrl = onCopyUrl,
+                onBrowseUrl = onBrowseUrl,
+                onRetryTask = onRetryTask,
+                onContinueTask = onContinueTask,
+                onWebCrawlTask = onWebCrawlTask,
+                onStopTask = onStopTask,
+                onDeleteTask = onDeleteTask,
+                detectedXhsLink = detectedXhsLink,
+                onDismissPrompt = onDismissPrompt,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            )
+        }
+
+        if (menuExpanded) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .clickable(
+                        interactionSource = scrimInteraction,
+                        indication = null
+                    ) { menuExpanded = false }
+            )
+
+            val bounds = overflowButtonBounds
+            if (bounds != null) {
+                val gapPx = with(density) { 8.dp.roundToPx() }
+                val menuLeftPx = (bounds.right - menuWidthPx).toInt().coerceAtLeast(with(density) { 8.dp.roundToPx() })
+                val menuTopPx = bounds.bottom.toInt() + gapPx
+                val pointerCenterPxRaw = bounds.center.x - menuLeftPx
+                val pointerCenterPx = pointerCenterPxRaw
+                    .coerceAtLeast(with(density) { 16.dp.toPx() })
+                    .coerceAtMost(menuWidthPx.toFloat() - with(density) { 16.dp.toPx() })
+
+                Popup(
+                    alignment = Alignment.TopStart,
+                    offset = IntOffset(menuLeftPx, menuTopPx),
+                    onDismissRequest = { menuExpanded = false },
+                    properties = PopupProperties(focusable = true)
+                ) {
+                    val triangleWidth = 22.dp
+                    val triangleHeight = 12.dp
+                    val triangleOffsetX = with(density) { pointerCenterPx.toDp() - triangleWidth / 2 }
+                    val bubbleColor = MiuixTheme.colorScheme.surface
+
+                    Column(modifier = Modifier.width(menuWidth)) {
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            androidx.compose.foundation.Canvas(
+                                modifier = Modifier
+                                    .offset(x = triangleOffsetX)
+                                    .size(triangleWidth, triangleHeight)
                             ) {
-                                Column(modifier = Modifier.padding(vertical = 6.dp, horizontal = 6.dp)) {
-                                    TextButton(
-                                        text = "复制文案",
-                                        onClick = {
-                                            menuExpanded = false
-                                            onCopyText()
-                                        },
-                                        enabled = !uiState.isDownloading,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    TextButton(
-                                        text = "网页爬取",
-                                        onClick = {
-                                            menuExpanded = false
-                                            onWebCrawlFromClipboard()
-                                        },
-                                        enabled = !uiState.isDownloading,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
+                                val path = androidx.compose.ui.graphics.Path().apply {
+                                    moveTo(size.width / 2f, 0f)
+                                    lineTo(0f, size.height)
+                                    lineTo(size.width, size.height)
+                                    close()
                                 }
+                                drawPath(path = path, color = bubbleColor)
+                            }
+                        }
+
+                        Card(
+                            cornerRadius = 18.dp,
+                            colors = CardDefaults.defaultColors(color = bubbleColor)
+                        ) {
+                            Column(modifier = Modifier.padding(vertical = 8.dp, horizontal = 8.dp)) {
+                                TextButton(
+                                    text = "复制文案",
+                                    onClick = {
+                                        menuExpanded = false
+                                        onCopyText()
+                                    },
+                                    enabled = !uiState.isDownloading,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                TextButton(
+                                    text = "网页爬取",
+                                    onClick = {
+                                        menuExpanded = false
+                                        onWebCrawlFromClipboard()
+                                    },
+                                    enabled = !uiState.isDownloading,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
                     }
-
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 12.dp)
-                            .size(48.dp)
-                            .clickable { menuExpanded = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = "···", fontSize = 20.sp)
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 26.dp)
-                            .size(48.dp)
-                            .clickable { onOpenSettings() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = MiuixIcons.Settings,
-                            contentDescription = "设置",
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
                 }
-            )
+            }
         }
-    ) { padding ->
-        HistoryPage(
-            uiState = uiState,
-            statusListState = statusListState,
-            onDownload = onDownload,
-            onMediaClick = onMediaClick,
-            onCopyUrl = onCopyUrl,
-            onBrowseUrl = onBrowseUrl,
-            onRetryTask = onRetryTask,
-            onContinueTask = onContinueTask,
-            onWebCrawlTask = onWebCrawlTask,
-            onStopTask = onStopTask,
-            onDeleteTask = onDeleteTask,
-            detectedXhsLink = detectedXhsLink,
-            onDismissPrompt = onDismissPrompt,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        )
     }
 }
 
