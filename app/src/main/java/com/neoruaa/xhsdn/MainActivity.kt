@@ -102,20 +102,16 @@ import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.icons.useful.Cancel
-import top.yukonga.miuix.kmp.icon.icons.useful.Info
-import top.yukonga.miuix.kmp.icon.icons.useful.NavigatorSwitch
-import top.yukonga.miuix.kmp.icon.icons.useful.Play
-import top.yukonga.miuix.kmp.icon.icons.useful.Save
-import top.yukonga.miuix.kmp.icon.icons.useful.Settings
+import top.yukonga.miuix.kmp.icon.extended.Download
+import top.yukonga.miuix.kmp.icon.extended.Info
+import top.yukonga.miuix.kmp.icon.extended.Play
+import top.yukonga.miuix.kmp.icon.extended.Settings
 import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.ThemeController
 import android.util.Size
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
-import top.yukonga.miuix.kmp.icon.icons.basic.SearchCleanup
-import top.yukonga.miuix.kmp.icon.icons.useful.Edit
 import androidx.compose.foundation.combinedClickable
 import java.io.File
 import android.util.LruCache
@@ -569,8 +565,8 @@ private fun MainScreen(
 
 
     val navItems = listOf(
-        NavigationItem("下载", MiuixIcons.Useful.Save),
-        NavigationItem("历史", MiuixIcons.Useful.Info)
+        NavigationItem("下载", MiuixIcons.Download),
+        NavigationItem("历史", MiuixIcons.Info)
     )
     val layoutDirection = LocalLayoutDirection.current
 
@@ -584,7 +580,7 @@ private fun MainScreen(
                 scrollBehavior = scrollBehavior,
                 actions = {
                     Icon(
-                        imageVector = MiuixIcons.Useful.Settings,
+                        imageVector = MiuixIcons.Settings,
                         contentDescription = "设置",
                         modifier = Modifier
                             .padding(end = 26.dp)
@@ -684,7 +680,7 @@ private fun DownloadPage(
                         verticalArrangement = Arrangement.Center
                     ) {
                         Icon(
-                            imageVector = MiuixIcons.Useful.Save,
+                            imageVector = MiuixIcons.Download,
                             contentDescription = "下载",
                             modifier = Modifier.size(64.dp),
                             tint = Color.White
@@ -787,7 +783,7 @@ private fun DownloadPage(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Icon(
-                            imageVector = MiuixIcons.Useful.Info,
+                            imageVector = MiuixIcons.Info,
                             contentDescription = null,
                             tint = Color(0xFF4CAF50),
                             modifier = Modifier.size(24.dp)
@@ -1360,7 +1356,7 @@ private fun MediaPreview(item: MediaItem, onClick: () -> Unit) {
             )
             if (item.type == MediaType.VIDEO) {
                 Icon(
-                    imageVector = MiuixIcons.Useful.Play,
+                    imageVector = MiuixIcons.Play,
                     contentDescription = "播放",
                     modifier = Modifier.size(20.dp)
                 )
@@ -1383,7 +1379,7 @@ private fun PlaceholderMedia(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
-            imageVector = if (type == MediaType.VIDEO) MiuixIcons.Useful.Play else MiuixIcons.Useful.Info,
+            imageVector = if (type == MediaType.VIDEO) MiuixIcons.Play else MiuixIcons.Info,
             contentDescription = null,
             modifier = Modifier.size(36.dp),
             tint = Color.Gray

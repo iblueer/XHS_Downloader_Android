@@ -11,7 +11,7 @@ android {
     defaultConfig {
         applicationId "com.neoruaa.xhsdn"
         minSdk 24
-        targetSdk 34
+        targetSdk 36
         versionCode 170
         versionName "1.7.0"
 
@@ -46,17 +46,18 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0'
     implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.10.0'
 
-    implementation "org.jetbrains.compose.runtime:runtime:1.9.3"
-    implementation "org.jetbrains.compose.foundation:foundation:1.9.3"
-    implementation "org.jetbrains.compose.ui:ui:1.9.3"
-    implementation "org.jetbrains.compose.ui:ui-tooling-preview:1.9.3"
-    debugImplementation "org.jetbrains.compose.ui:ui-tooling:1.9.3"
+    implementation "org.jetbrains.compose.runtime:runtime:1.10.0"
+    implementation "org.jetbrains.compose.foundation:foundation:1.10.0"
+    implementation "org.jetbrains.compose.ui:ui:1.10.0"
+    implementation "org.jetbrains.compose.ui:ui-tooling-preview:1.10.0"
+    debugImplementation "org.jetbrains.compose.ui:ui-tooling:1.10.0"
     implementation "org.jetbrains.compose.material3:material3:1.9.0"
     implementation "org.jetbrains.compose.material3:material3-window-size-class:1.9.0"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2"
 
-    implementation "top.yukonga.miuix.kmp:miuix-android:0.7.2"
-//    implementation "top.yukonga.miuix.kmp:miuix-icons-android:0.8.0-rc04"
+    implementation "top.yukonga.miuix.kmp:miuix-android:0.8.0-rc06"
+    implementation "top.yukonga.miuix.kmp:miuix-icons-android:0.8.0-rc06"
+    implementation "io.github.kyant0:capsule:2.1.2"
 
     implementation 'com.squareup.okhttp3:okhttp:5.3.2'
     testImplementation 'junit:junit:4.13.2'
