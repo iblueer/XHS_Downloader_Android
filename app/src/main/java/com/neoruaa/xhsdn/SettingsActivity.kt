@@ -95,9 +95,9 @@ data class SettingsUiState(
     val useCustomNaming: Boolean = false,
     val template: TextFieldValue = TextFieldValue(NamingFormat.DEFAULT_TEMPLATE),
     val tokens: List<NamingFormat.TokenDefinition> = emptyList(),
-    val autoViewProgress: Boolean = true,
     val debugNotificationEnabled: Boolean = false,
-    val showClipboardBubble: Boolean = true
+    val showClipboardBubble: Boolean = true,
+    val autoReadClipboard: Boolean = false
 )
 
 class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
@@ -114,18 +114,17 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
         if (template.isNullOrEmpty()) {
             template = NamingFormat.DEFAULT_TEMPLATE
         }
-        val autoViewProgress = prefs.getBoolean("auto_view_progress", true)  // 默认开启
-        val autoDownloadEnabled = prefs.getBoolean("auto_download_enabled", false)
         val debugNotificationEnabled = prefs.getBoolean("debug_notification_enabled", false)
         val showClipboardBubble = prefs.getBoolean("show_clipboard_bubble", true) // Default true
+        val autoReadClipboard = prefs.getBoolean("auto_read_clipboard", false)
         return SettingsUiState(
             createLivePhotos = createLivePhotos,
             useCustomNaming = useCustomNaming,
             template = TextFieldValue(template),
             tokens = NamingFormat.getAvailableTokens(),
-            autoViewProgress = autoViewProgress,
             debugNotificationEnabled = debugNotificationEnabled,
-            showClipboardBubble = showClipboardBubble
+            showClipboardBubble = showClipboardBubble,
+            autoReadClipboard = autoReadClipboard
         )
     }
 
@@ -157,12 +156,6 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
 
 
 
-    fun onAutoViewProgressChange(enabled: Boolean) = updateState {
-        it.copy(autoViewProgress = enabled).also { newState ->
-            persist(newState)
-        }
-    }
-
     fun onDebugNotificationChange(enabled: Boolean) = updateState {
         it.copy(debugNotificationEnabled = enabled).also { newState ->
             persist(newState)
@@ -175,15 +168,21 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
         }
     }
 
+    fun onAutoReadClipboardChange(enabled: Boolean) = updateState {
+        it.copy(autoReadClipboard = enabled).also { newState ->
+            persist(newState)
+        }
+    }
+
     private fun persist(state: SettingsUiState) {
         hasChanges = true
         prefs.edit()
             .putBoolean("create_live_photos", state.createLivePhotos)
             .putBoolean("use_custom_naming_format", state.useCustomNaming)
             .putString("custom_naming_template", state.template.text.ifBlank { NamingFormat.DEFAULT_TEMPLATE })
-            .putBoolean("auto_view_progress", state.autoViewProgress)
             .putBoolean("debug_notification_enabled", state.debugNotificationEnabled)
             .putBoolean("show_clipboard_bubble", state.showClipboardBubble)
+            .putBoolean("auto_read_clipboard", state.autoReadClipboard)
             .remove("use_metadata_file_names")
             .apply()
     }
@@ -247,9 +246,9 @@ class SettingsActivity : ComponentActivity() {
                     onUseCustomNamingChange = viewModel::onUseCustomNamingChange,
                     onTemplateChange = viewModel::onTemplateChange,
                     onResetTemplate = viewModel::onResetTemplate,
-                    onAutoViewProgressChange = viewModel::onAutoViewProgressChange,
                     onDebugNotificationChange = viewModel::onDebugNotificationChange,
                     onShowClipboardBubbleChange = viewModel::onShowClipboardBubbleChange,
+                    onAutoReadClipboardChange = viewModel::onAutoReadClipboardChange,
 
                     topBarState = topBarState
                 )
@@ -281,9 +280,9 @@ private fun SettingsScreen(
     onUseCustomNamingChange: (Boolean) -> Unit,
     onTemplateChange: (TextFieldValue) -> Unit,
     onResetTemplate: () -> Unit,
-    onAutoViewProgressChange: (Boolean) -> Unit,
     onDebugNotificationChange: (Boolean) -> Unit,
     onShowClipboardBubbleChange: (Boolean) -> Unit,
+    onAutoReadClipboardChange: (Boolean) -> Unit,
     topBarState: top.yukonga.miuix.kmp.basic.TopAppBarState
 ) {
     val context = LocalContext.current
@@ -334,12 +333,6 @@ private fun SettingsScreen(
                             onCheckedChange = onCreateLivePhotosChange
                         )
                         PreferenceRow(
-                            title = "自动查看进度",
-                            description = "开始下载后自动跳转到历史页",
-                            checked = uiState.autoViewProgress,
-                            onCheckedChange = onAutoViewProgressChange
-                        )
-                        PreferenceRow(
                             title = "调试通知",
                             description = "显示详细的下载调试信息",
                             checked = uiState.debugNotificationEnabled,
@@ -364,6 +357,12 @@ private fun SettingsScreen(
                             description = "检测到链接时显示提示卡片",
                             checked = uiState.showClipboardBubble,
                             onCheckedChange = onShowClipboardBubbleChange
+                        )
+                        PreferenceRow(
+                            title = "自动读取剪贴板并下载",
+                            description = "检测到链接时自动开始下载",
+                            checked = uiState.autoReadClipboard,
+                            onCheckedChange = onAutoReadClipboardChange
                         )
                     }
                 }
