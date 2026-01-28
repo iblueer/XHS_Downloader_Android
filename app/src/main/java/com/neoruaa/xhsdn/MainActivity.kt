@@ -1187,10 +1187,10 @@ private fun TaskCell(
                         modifier = Modifier.weight(1f)
                     )
                     
-                    // 浏览按钮
+                    // 爬取按钮（通过网页爬取功能打开）
                     TextButton(
-                        text = "浏览",
-                        onClick = onBrowseUrl,
+                        text = "爬取",
+                        onClick = onWebCrawl,
                         modifier = Modifier.weight(1f)
                     )
                     
