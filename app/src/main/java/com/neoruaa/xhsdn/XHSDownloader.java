@@ -11,9 +11,13 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -26,6 +30,7 @@ import okhttp3.Response;
 
 public class XHSDownloader {
     private static final String TAG = "XHSDownloader";
+    private static final String USER_AGENT_XHS_ANDROID = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36 xiaohongshu";
     private Context context;
     private OkHttpClient httpClient;
     private List<String> downloadUrls;
@@ -567,7 +572,7 @@ public class XHSDownloader {
             // Create a request to fetch the post details
             Request request = new Request.Builder()
                     .url(url)
-                    .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+                    .addHeader("User-Agent", USER_AGENT_XHS_ANDROID)
                     .addHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=1.0,image/avif,image/webp,image/apng,*/*;q=1.0")
                     .build();
             
@@ -585,6 +590,338 @@ public class XHSDownloader {
             return null;
         }
     }
+
+    private static boolean isJsIdentifierChar(char c) {
+        return Character.isLetterOrDigit(c) || c == '_' || c == '$';
+    }
+
+    /**
+     * Extract the first JS object literal (starting with '{') from a larger JS snippet.
+     * This helps when the script contains extra JS after the state object.
+     */
+    private static String extractFirstJsObjectLiteral(String jsSnippet) {
+        if (jsSnippet == null) return null;
+
+        boolean inString = false;
+        char quote = 0;
+        boolean escape = false;
+        int depth = 0;
+        int start = -1;
+
+        for (int i = 0; i < jsSnippet.length(); i++) {
+            char c = jsSnippet.charAt(i);
+
+            if (inString) {
+                if (escape) {
+                    escape = false;
+                    continue;
+                }
+                if (c == '\\') {
+                    escape = true;
+                    continue;
+                }
+                if (c == quote) {
+                    inString = false;
+                    quote = 0;
+                }
+                continue;
+            }
+
+            if (c == '"' || c == '\'') {
+                inString = true;
+                quote = c;
+                continue;
+            }
+
+            if (c == '{') {
+                if (depth == 0) start = i;
+                depth++;
+            } else if (c == '}') {
+                if (depth > 0) {
+                    depth--;
+                    if (depth == 0 && start != -1) {
+                        return jsSnippet.substring(start, i + 1);
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Convert a JS-ish object literal to strict JSON by replacing bare `undefined` tokens with `null`.
+     * Only replaces tokens outside of quoted strings.
+     */
+    private static String replaceJsUndefinedWithNull(String input) {
+        if (input == null || !input.contains("undefined")) return input;
+
+        StringBuilder out = new StringBuilder(input.length());
+        boolean inString = false;
+        char quote = 0;
+        boolean escape = false;
+
+        for (int i = 0; i < input.length(); ) {
+            char c = input.charAt(i);
+
+            if (inString) {
+                out.append(c);
+                if (escape) {
+                    escape = false;
+                    i++;
+                    continue;
+                }
+                if (c == '\\') {
+                    escape = true;
+                } else if (c == quote) {
+                    inString = false;
+                    quote = 0;
+                }
+                i++;
+                continue;
+            }
+
+            if (c == '"' || c == '\'') {
+                inString = true;
+                quote = c;
+                out.append(c);
+                i++;
+                continue;
+            }
+
+            if (i + "undefined".length() <= input.length() && input.startsWith("undefined", i)) {
+                char prev = (i > 0) ? input.charAt(i - 1) : '\0';
+                char next = (i + "undefined".length() < input.length()) ? input.charAt(i + "undefined".length()) : '\0';
+                boolean prevOk = (i == 0) || !isJsIdentifierChar(prev);
+                boolean nextOk = (i + "undefined".length() == input.length()) || !isJsIdentifierChar(next);
+                if (prevOk && nextOk) {
+                    out.append("null");
+                    i += "undefined".length();
+                    continue;
+                }
+            }
+
+            out.append(c);
+            i++;
+        }
+
+        return out.toString();
+    }
+
+    private JSONObject parseInitialStateRootFromHtml(String html) {
+        if (html == null) return null;
+
+        int startIndex = html.indexOf("window.__INITIAL_STATE__");
+        if (startIndex == -1) return null;
+
+        int endIndex = html.indexOf("</script>", startIndex);
+        if (endIndex == -1) return null;
+
+        String scriptContent = html.substring(startIndex, endIndex);
+        int equalsIndex = scriptContent.indexOf("=");
+        if (equalsIndex == -1) return null;
+
+        String afterEquals = scriptContent.substring(equalsIndex + 1).trim();
+
+        // The script may contain extra JS after the object. Extract the first balanced object literal.
+        String jsObject = extractFirstJsObjectLiteral(afterEquals);
+        if (jsObject == null) {
+            // Fallback: try parsing whatever remains (might already be pure JSON).
+            jsObject = afterEquals;
+        }
+
+        jsObject = jsObject.trim();
+        if (jsObject.endsWith(";")) {
+            jsObject = jsObject.substring(0, jsObject.length() - 1).trim();
+        }
+
+        jsObject = replaceJsUndefinedWithNull(jsObject);
+
+        try {
+            return new JSONObject(jsObject);
+        } catch (JSONException e) {
+            Log.e(TAG, "Error parsing __INITIAL_STATE__ JSON: " + e.getMessage());
+            try {
+                Log.d(TAG, "__INITIAL_STATE__ (first 500 chars): " + jsObject.substring(0, Math.min(500, jsObject.length())));
+            } catch (Exception ignored) {
+            }
+            return null;
+        }
+    }
+
+    private static boolean isLikelyNoteObject(JSONObject obj) {
+        if (obj == null) return false;
+
+        try {
+            if (obj.has("imageList") && obj.get("imageList") instanceof JSONArray) {
+                JSONArray list = obj.getJSONArray("imageList");
+                if (list.length() > 0 && list.get(0) instanceof JSONObject) {
+                    JSONObject first = list.getJSONObject(0);
+                    return first.has("urlDefault") || first.has("url") || first.has("traceId") || first.has("infoList");
+                }
+            }
+
+            if (obj.has("images") && obj.get("images") instanceof JSONArray) {
+                JSONArray list = obj.getJSONArray("images");
+                if (list.length() > 0 && list.get(0) instanceof JSONObject) {
+                    JSONObject first = list.getJSONObject(0);
+                    return first.has("urlDefault") || first.has("url") || first.has("traceId") || first.has("infoList");
+                }
+            }
+
+            if (obj.has("video") && obj.get("video") instanceof JSONObject) {
+                JSONObject video = obj.getJSONObject("video");
+                return video.has("consumer") || video.has("media");
+            }
+        } catch (Exception ignored) {
+        }
+
+        return false;
+    }
+
+    private static void addNoteCandidate(JSONObject note, List<JSONObject> notes, Set<String> seenNoteIds) {
+        if (note == null) return;
+
+        // Avoid empty placeholder objects (these break extraction and block better candidates).
+        JSONArray names = note.names();
+        if (names == null || names.length() == 0) return;
+
+        String noteId = note.optString("noteId", "");
+        if (!TextUtils.isEmpty(noteId)) {
+            if (!seenNoteIds.add(noteId)) return;
+        }
+        notes.add(note);
+    }
+
+    private List<JSONObject> findNoteObjects(JSONObject root) {
+        List<JSONObject> notes = new ArrayList<>();
+        Set<String> seenNoteIds = new HashSet<>();
+
+        try {
+            // 1) Legacy: root.note.noteDetailMap[*].note
+            if (root.has("note") && root.get("note") instanceof JSONObject) {
+                JSONObject noteRoot = root.getJSONObject("note");
+
+                if (noteRoot.has("noteDetailMap") && noteRoot.get("noteDetailMap") instanceof JSONObject) {
+                    JSONObject noteDetailMap = noteRoot.getJSONObject("noteDetailMap");
+                    JSONArray keys = noteDetailMap.names();
+                    if (keys != null) {
+                        for (int i = 0; i < keys.length(); i++) {
+                            String key = keys.getString(i);
+                            JSONObject noteData = noteDetailMap.optJSONObject(key);
+                            if (noteData != null) {
+                                JSONObject note = noteData.optJSONObject("note");
+                                addNoteCandidate(note, notes, seenNoteIds);
+                            }
+                        }
+                    }
+                } else if (noteRoot.has("note") && noteRoot.get("note") instanceof JSONObject) {
+                    addNoteCandidate(noteRoot.getJSONObject("note"), notes, seenNoteIds);
+                } else if (noteRoot.has("feed") && noteRoot.get("feed") instanceof JSONObject) {
+                    JSONObject feed = noteRoot.getJSONObject("feed");
+                    JSONArray items = feed.optJSONArray("items");
+                    if (items != null) {
+                        for (int i = 0; i < items.length(); i++) {
+                            JSONObject note = items.optJSONObject(i);
+                            addNoteCandidate(note, notes, seenNoteIds);
+                        }
+                    }
+                } else {
+                    // Some pages embed the note directly under root.note
+                    addNoteCandidate(noteRoot, notes, seenNoteIds);
+                }
+            }
+
+            // 2) Legacy: root.feed.items[*]
+            if (root.has("feed") && root.get("feed") instanceof JSONObject) {
+                JSONObject feed = root.getJSONObject("feed");
+                JSONArray items = feed.optJSONArray("items");
+                if (items != null) {
+                    for (int i = 0; i < items.length(); i++) {
+                        JSONObject note = items.optJSONObject(i);
+                        addNoteCandidate(note, notes, seenNoteIds);
+                    }
+                }
+            }
+
+            // 3) Newer: root.noteData.data.noteData
+            if (root.has("noteData") && root.get("noteData") instanceof JSONObject) {
+                JSONObject noteDataRoot = root.getJSONObject("noteData");
+                JSONObject data = noteDataRoot.optJSONObject("data");
+                if (data != null) {
+                    JSONObject note = data.optJSONObject("noteData");
+                    if (note == null) {
+                        // Some variants may use a different key under data.
+                        note = data.optJSONObject("note");
+                    }
+                    addNoteCandidate(note, notes, seenNoteIds);
+                }
+            }
+
+            // 4) Last resort: deep scan for a note-like object anywhere.
+            boolean hasLikely = false;
+            for (JSONObject n : notes) {
+                if (isLikelyNoteObject(n) || n.has("imageList") || n.has("images") || n.has("video")) {
+                    hasLikely = true;
+                    break;
+                }
+            }
+
+            if (notes.isEmpty() || !hasLikely) {
+                Deque<Object> stack = new ArrayDeque<>();
+                stack.push(root);
+                int visited = 0;
+                int maxVisited = 50000;
+                int maxNotes = 5;
+
+                while (!stack.isEmpty() && visited < maxVisited && notes.size() < maxNotes) {
+                    Object current = stack.pop();
+                    visited++;
+
+                    if (current instanceof JSONObject) {
+                        JSONObject obj = (JSONObject) current;
+
+                        // Prefer unwrapping { note: {...} } when present.
+                        JSONObject innerNote = obj.optJSONObject("note");
+                        if (innerNote != null) {
+                            stack.push(innerNote);
+                        }
+
+                        if (isLikelyNoteObject(obj)) {
+                            addNoteCandidate(obj, notes, seenNoteIds);
+                            if (notes.size() >= maxNotes) break;
+                        }
+
+                        JSONArray names = obj.names();
+                        if (names != null) {
+                            for (int i = 0; i < names.length(); i++) {
+                                Object v = obj.opt(names.getString(i));
+                                if (v instanceof JSONObject || v instanceof JSONArray) {
+                                    stack.push(v);
+                                }
+                            }
+                        }
+                    } else if (current instanceof JSONArray) {
+                        JSONArray arr = (JSONArray) current;
+                        for (int i = 0; i < arr.length(); i++) {
+                            Object v = arr.opt(i);
+                            if (v instanceof JSONObject || v instanceof JSONArray) {
+                                stack.push(v);
+                            }
+                        }
+                    }
+                }
+
+                if (!notes.isEmpty()) {
+                    Log.d(TAG, "Deep scan found " + notes.size() + " note candidate(s)");
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error finding note objects: " + e.getMessage());
+        }
+
+        return notes;
+    }
     
     public List<String> parsePostDetails(String html) {
         List<String> mediaUrls = new ArrayList<>();
@@ -595,112 +932,11 @@ public class XHSDownloader {
         // This is a simplified approach - in a real implementation, you'd need to parse the actual structure
 
         // Look for JSON data containing media URLs
-        int startIndex = html.indexOf("window.__INITIAL_STATE__=");
-        if (startIndex != -1) {
-            int endIndex = html.indexOf("</script>", startIndex);
-            if (endIndex != -1) {
-                String scriptContent = html.substring(startIndex, endIndex);
-
-                // Extract the JSON part
-                int jsonStart = scriptContent.indexOf("=");
-                if (jsonStart != -1) {
-                    String jsonData = scriptContent.substring(jsonStart + 1).trim();
-
-                    try {
-                        JSONObject root = new JSONObject(jsonData);
-
-                        // Navigate through the JSON structure to find media URLs
-                        // Try multiple approaches to handle different JSON structures
-                        if (root.has("note")) {
-                            JSONObject noteRoot = root.getJSONObject("note");
-
-                            // Try to get from noteDetailMap first (most common structure)
-                            if (noteRoot.has("noteDetailMap")) {
-                                JSONObject noteDetailMap = noteRoot.getJSONObject("noteDetailMap");
-
-                                // Get all the keys in the noteDetailMap
-                                JSONArray keys = noteDetailMap.names();
-                                if (keys != null && keys.length() > 0) {
-                                    // Process each note in the map - there might be multiple notes or just one
-                                    for (int i = 0; i < keys.length(); i++) {
-                                        String key = keys.getString(i);
-                                        JSONObject noteData = noteDetailMap.getJSONObject(key);
-
-                                        if (noteData.has("note")) {
-                                            // Found the actual note data
-                                            JSONObject note = noteData.getJSONObject("note");
-                                            mediaUrls.addAll(extractMediaUrlsFromNote(note, mediaPairs));
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Alternative structures - try different approaches
-                                // 1. Direct note in noteRoot
-                                if (noteRoot.has("note")) {
-                                    JSONObject note = noteRoot.getJSONObject("note");
-                                    mediaUrls.addAll(extractMediaUrlsFromNote(note, mediaPairs));
-                                }
-                                // 2. Feed structure
-                                else if (noteRoot.has("feed")) {
-                                    JSONObject feed = noteRoot.getJSONObject("feed");
-                                    if (feed.has("items") && feed.getJSONArray("items").length() > 0) {
-                                        JSONArray items = feed.getJSONArray("items");
-                                        for (int i = 0; i < items.length(); i++) {
-                                            JSONObject note = items.getJSONObject(i);
-                                            mediaUrls.addAll(extractMediaUrlsFromNote(note, mediaPairs));
-                                        }
-                                    }
-                                }
-                                // 3. Try as a direct note structure (fallback)
-                                else {
-                                    mediaUrls.addAll(extractMediaUrlsFromNote(noteRoot, mediaPairs));
-                                }
-                            }
-                        }
-                        // Fallback: Check if root itself contains the note data directly
-                        else if (root.has("feed")) {
-                            JSONObject feed = root.getJSONObject("feed");
-                            if (feed.has("items") && feed.getJSONArray("items").length() > 0) {
-                                JSONArray items = feed.getJSONArray("items");
-                                for (int i = 0; i < items.length(); i++) {
-                                    JSONObject note = items.getJSONObject(i);
-                                    mediaUrls.addAll(extractMediaUrlsFromNote(note, mediaPairs));
-                                }
-                            }
-                        }
-                        // Another fallback - could be in different top-level structure
-                        else {
-                            // Try to find any note-like object in the root
-                            JSONArray names = root.names();
-                            if (names != null) {
-                                for (int i = 0; i < names.length(); i++) {
-                                    String key = names.getString(i);
-                                    Object value = root.get(key);
-                                    if (value instanceof JSONObject) {
-                                        JSONObject obj = (JSONObject) value;
-                                        if (obj.has("note") || obj.has("imageList") || obj.has("video")) {
-                                            mediaUrls.addAll(extractMediaUrlsFromNote(obj, mediaPairs));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (JSONException e) {
-                        Log.e(TAG, "Error parsing JSON: " + e.getMessage());
-
-                        // Add more detailed logging to understand what's in the JSON
-                        try {
-                            // Log the first 500 characters of JSON to see structure
-                            Log.d(TAG, "Full JSON data (first 500 chars): " + jsonData.substring(0, Math.min(500, jsonData.length())));
-                        } catch (Exception ex) {
-                            Log.e(TAG, "Error logging JSON: " + ex.getMessage());
-                        }
-
-                        // Fallback - try to extract URLs directly from HTML
-                        // This handles cases where the structured JSON isn't available
-                        mediaUrls.addAll(extractUrlsFromHtml(html));
-                    }
-                }
+        JSONObject root = parseInitialStateRootFromHtml(html);
+        if (root != null) {
+            List<JSONObject> notes = findNoteObjects(root);
+            for (JSONObject note : notes) {
+                mediaUrls.addAll(extractMediaUrlsFromNote(note, mediaPairs));
             }
         } else {
             // If structured JSON isn't available, try to extract URLs directly from HTML
@@ -1842,7 +2078,7 @@ public class XHSDownloader {
             // 创建一个GET请求来获取重定向的URL（GET请求通常会自动跟踪重定向）
             okhttp3.Request request = new okhttp3.Request.Builder()
                     .url(shortUrl)
-                    .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36 xiaohongshu")
+                    .addHeader("User-Agent", USER_AGENT_XHS_ANDROID)
                     .build();
             
             // 同步执行请求
@@ -1976,125 +2212,14 @@ public class XHSDownloader {
                     String postDetails = fetchPostDetails(url);
                     
                     if (postDetails != null) {
-                        // Navigate through the JSON structure to find the description
-                        JSONObject root = null;
-                        // Look for JSON data in the HTML that contains media information
-                        int startIndex = postDetails.indexOf("window.__INITIAL_STATE__=");
-                        if (startIndex != -1) {
-                            int endIndex = postDetails.indexOf("</script>", startIndex);
-                            if (endIndex != -1) {
-                                String scriptContent = postDetails.substring(startIndex, endIndex);
-                                
-                                // Extract the JSON part
-                                int jsonStart = scriptContent.indexOf("=");
-                                if (jsonStart != -1) {
-                                    String jsonData = scriptContent.substring(jsonStart + 1).trim();
-                                    
-                                    try {
-                                        root = new JSONObject(jsonData);
-                                        
-                                        // Try to get from different possible structure paths (similar to parsePostDetails)
-                                        if (root.has("note")) {
-                                            JSONObject noteRoot = root.getJSONObject("note");
-                                            
-                                            // Try to get from noteDetailMap first (most common structure)
-                                            if (noteRoot.has("noteDetailMap")) {
-                                                JSONObject noteDetailMap = noteRoot.getJSONObject("noteDetailMap");
-                                                
-                                                // Get all the keys in the noteDetailMap
-                                                JSONArray keys = noteDetailMap.names();
-                                                if (keys != null && keys.length() > 0) {
-                                                    // Process each note in the map - there might be multiple notes or just one
-                                                    for (int i = 0; i < keys.length(); i++) {
-                                                        String key = keys.getString(i);
-                                                        JSONObject noteData = noteDetailMap.getJSONObject(key);
-                                                        
-                                                        if (noteData.has("note")) {
-                                                            // Found the actual note data
-                                                            JSONObject note = noteData.getJSONObject("note");
-                                                            String desc = extractNoteDescription(note);
-                                                            if (desc != null && !desc.isEmpty()) {
-                                                                Log.d(TAG, "Found description: " + desc);
-                                                                return desc;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                // Alternative structures - try different approaches
-                                                // 1. Direct note in noteRoot
-                                                if (noteRoot.has("note")) {
-                                                    JSONObject note = noteRoot.getJSONObject("note");
-                                                    String desc = extractNoteDescription(note);
-                                                    if (desc != null && !desc.isEmpty()) {
-                                                        Log.d(TAG, "Found description: " + desc);
-                                                        return desc;
-                                                    }
-                                                } 
-                                                // 2. Feed structure
-                                                else if (noteRoot.has("feed")) {
-                                                    JSONObject feed = noteRoot.getJSONObject("feed");
-                                                    if (feed.has("items") && feed.getJSONArray("items").length() > 0) {
-                                                        JSONArray items = feed.getJSONArray("items");
-                                                        for (int i = 0; i < items.length(); i++) {
-                                                            JSONObject note = items.getJSONObject(i);
-                                                            String desc = extractNoteDescription(note);
-                                                            if (desc != null && !desc.isEmpty()) {
-                                                                Log.d(TAG, "Found description: " + desc);
-                                                                return desc;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                // 3. Try as a direct note structure (fallback)
-                                                else {
-                                                    String desc = extractNoteDescription(noteRoot);
-                                                    if (desc != null && !desc.isEmpty()) {
-                                                        Log.d(TAG, "Found description: " + desc);
-                                                        return desc;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        // Fallback: Check if root itself contains the note data directly
-                                        else if (root.has("feed")) {
-                                            JSONObject feed = root.getJSONObject("feed");
-                                            if (feed.has("items") && feed.getJSONArray("items").length() > 0) {
-                                                JSONArray items = feed.getJSONArray("items");
-                                                for (int i = 0; i < items.length(); i++) {
-                                                    JSONObject note = items.getJSONObject(i);
-                                                    String desc = extractNoteDescription(note);
-                                                    if (desc != null && !desc.isEmpty()) {
-                                                        Log.d(TAG, "Found description: " + desc);
-                                                        return desc;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        // Another fallback - could be in different top-level structure
-                                        else {
-                                            // Try to find any note-like object in the root
-                                            JSONArray names = root.names();
-                                            if (names != null) {
-                                                for (int i = 0; i < names.length(); i++) {
-                                                    String key = names.getString(i);
-                                                    Object value = root.get(key);
-                                                    if (value instanceof JSONObject) {
-                                                        JSONObject obj = (JSONObject) value;
-                                                        if (obj.has("note") || obj.has("imageList") || obj.has("video")) {
-                                                            String desc = extractNoteDescription(obj);
-                                                            if (desc != null && !desc.isEmpty()) {
-                                                                Log.d(TAG, "Found description: " + desc);
-                                                                return desc;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    } catch (JSONException e) {
-                                        Log.e(TAG, "Error parsing JSON: " + e.getMessage());
-                                    }
+                        JSONObject root = parseInitialStateRootFromHtml(postDetails);
+                        if (root != null) {
+                            List<JSONObject> notes = findNoteObjects(root);
+                            for (JSONObject note : notes) {
+                                String desc = extractNoteDescription(note);
+                                if (desc != null && !desc.isEmpty()) {
+                                    Log.d(TAG, "Found description: " + desc);
+                                    return desc;
                                 }
                             }
                         }
