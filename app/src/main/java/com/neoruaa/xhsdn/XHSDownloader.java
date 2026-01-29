@@ -1041,22 +1041,22 @@ public class XHSDownloader {
                         downloadCallback.onVideoDetected();
                     }
                 }
-                // 备用方案：检查media.stream.h264
+                // 备用方案：检查media.stream.h265
                 else if (video.has("media")) {
                     Log.d(TAG, "Found media field in video");
                     JSONObject media = video.getJSONObject("media");
                     if (media.has("stream")) {
                         JSONObject stream = media.getJSONObject("stream");
-                        if (stream.has("h264")) {
-                            JSONArray h264Array = stream.getJSONArray("h264");
-                            for (int j = 0; j < h264Array.length(); j++) {
-                                Object h264Obj = h264Array.get(j);
+                        if (stream.has("h265")) {
+                            JSONArray h265Array = stream.getJSONArray("h265");
+                            for (int j = 0; j < h265Array.length(); j++) {
+                                Object h265Obj = h265Array.get(j);
                                 // 如果是字符串，直接使用；如果是JSON对象，提取URL字段
-                                if (h264Obj instanceof String) {
-                                    String url = (String) h264Obj;
+                                if (h265Obj instanceof String) {
+                                    String url = (String) h265Obj;
                                     // 确保这是一个有效的URL而不是JSON字符串
                                     if (url.startsWith("http")) {
-                                        Log.d(TAG, "Extracted video URL from h264 string: " + url);
+                                        Log.d(TAG, "Extracted video URL from h265 string: " + url);
                                         mediaUrls.add(url);
                                         // Mark that videos have been detected
                                         videosDetected = true;
@@ -1065,21 +1065,21 @@ public class XHSDownloader {
                                             downloadCallback.onVideoDetected();
                                         }
                                     }
-                                } else if (h264Obj instanceof JSONObject) {
-                                    JSONObject h264Json = (JSONObject) h264Obj;
+                                } else if (h265Obj instanceof JSONObject) {
+                                    JSONObject h265Json = (JSONObject) h265Obj;
                                     // 尝试获取URL字段
-                                    if (h264Json.has("url")) {
-                                        Log.d(TAG, "Extracted video URL from h264.url: " + h264Json.getString("url"));
-                                        mediaUrls.add(h264Json.getString("url"));
+                                    if (h265Json.has("url")) {
+                                        Log.d(TAG, "Extracted video URL from h265.url: " + h265Json.getString("url"));
+                                        mediaUrls.add(h265Json.getString("url"));
                                         // Mark that videos have been detected
                                         videosDetected = true;
                                         if (shouldStopOnVideo && downloadCallback != null && !videoWarningShown) {
                                             videoWarningShown = true;
                                             downloadCallback.onVideoDetected();
                                         }
-                                    } else if (h264Json.has("masterUrl")) {
-                                        Log.d(TAG, "Extracted video URL from h264.masterUrl: " + h264Json.getString("masterUrl"));
-                                        mediaUrls.add(h264Json.getString("masterUrl"));
+                                    } else if (h265Json.has("masterUrl")) {
+                                        Log.d(TAG, "Extracted video URL from h265.masterUrl: " + h265Json.getString("masterUrl"));
+                                        mediaUrls.add(h265Json.getString("masterUrl"));
                                         // Mark that videos have been detected
                                         videosDetected = true;
                                         if (shouldStopOnVideo && downloadCallback != null && !videoWarningShown) {
@@ -1431,26 +1431,47 @@ public class XHSDownloader {
                 return null;
             }
 
-            JSONObject user = note.has("user") ? note.optJSONObject("user") : null;
+            JSONObject user = null;
             String nickname = null;
             String redId = null;
+
+            // Try to get user from direct "user" field
+            if (note.has("user")) {
+                user = note.optJSONObject("user");
+            }
+
+            // If not found, try alternative locations that might be used in newer structures
+            if (user == null && note.has("user_info")) {
+                user = note.optJSONObject("user_info");
+            }
+
             if (user != null) {
                 nickname = firstNonEmpty(
                         user.optString("nickname", null),
                         user.optString("name", null),
-                        user.optString("userName", null));
+                        user.optString("userName", null),
+                        user.optString("nickName", null)); // Some structures use camelCase
                 redId = firstNonEmpty(
                         user.optString("redId", null),
                         user.optString("red_id", null),
                         user.optString("userId", null),
                         user.optString("userid", null),
-                        user.optString("user_id", null));
+                        user.optString("user_id", null),
+                        user.optString("id", null)); // Some structures might use generic "id"
             }
 
+            // If still not found, try to get from note level (backup)
             if (TextUtils.isEmpty(redId)) {
                 redId = firstNonEmpty(
                         note.optString("userId", null),
-                        note.optString("uid", null));
+                        note.optString("uid", null),
+                        note.optString("user_id", null));
+            }
+
+            if (TextUtils.isEmpty(nickname)) {
+                nickname = firstNonEmpty(
+                        note.optString("author", null),
+                        note.optString("userName", null));
             }
 
             String title = firstNonEmpty(
@@ -1696,7 +1717,7 @@ public class XHSDownloader {
             for (int i = 0; i < titleTokenCount; i++) {
                 finalTemplate = finalTemplate.replaceFirst(
                     java.util.regex.Pattern.quote(NamingFormat.buildPlaceholder(NamingFormat.TOKEN_TITLE)),
-                    java.util.regex.Matcher.quoteReplacement(titleValue));
+                    java.util.regex.Matcher.quoteReplacement(titleValue != null ? titleValue : ""));
             }
 
             // Process the template with all remaining tokens (the title is already properly sized)
@@ -1708,7 +1729,7 @@ public class XHSDownloader {
                 if (replacement == null) {
                     replacement = "";
                 }
-                finalMatcher.appendReplacement(finalBuffer, java.util.regex.Matcher.quoteReplacement(replacement));
+                finalMatcher.appendReplacement(finalBuffer, java.util.regex.Matcher.quoteReplacement(replacement != null ? replacement : ""));
             }
             finalMatcher.appendTail(finalBuffer);
             result = finalBuffer.toString();
@@ -1722,7 +1743,7 @@ public class XHSDownloader {
                 if (replacement == null) {
                     replacement = "";
                 }
-                matcher.appendReplacement(buffer, java.util.regex.Matcher.quoteReplacement(replacement));
+                matcher.appendReplacement(buffer, java.util.regex.Matcher.quoteReplacement(replacement != null ? replacement : ""));
             }
             matcher.appendTail(buffer);
             result = buffer.toString();
