@@ -61,7 +61,7 @@ public class XHSDownloader {
     // Flag to track if videos have been detected in the current download
     private boolean videosDetected = false;
     // Flag to track if video warning has already been shown to avoid repeated warnings
-    private boolean videoWarningShown = false;
+    private boolean videoWarningShown = true;
     // Flag to control if download should stop when video is detected
     private volatile boolean shouldStopOnVideo = false;
     // Flag to indicate if download should be stopped

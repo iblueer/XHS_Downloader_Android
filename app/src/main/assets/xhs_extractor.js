@@ -138,16 +138,28 @@
                 }
 
                 // First check for regular video (video type posts)
-                if (noteData.video &&
-                    noteData.video.consumer &&
-                    noteData.video.consumer.originVideoKey) {
+                if (noteData.video) {
+                    if (noteData.video.consumer &&
+                        noteData.video.consumer.originVideoKey) {
 
-                    var originVideoKey = noteData.video.consumer.originVideoKey;
-                    var actualVideoUrl = 'https://sns-video-bd.xhscdn.com/' + originVideoKey;
+                        var originVideoKey = noteData.video.consumer.originVideoKey;
+                        var actualVideoUrl = 'https://sns-video-bd.xhscdn.com/' + originVideoKey;
 
-                    console.log('✓ Extracted actual video URL from page state: ' + actualVideoUrl);
-                    return actualVideoUrl;
+                        console.log('✓ Extracted actual video URL from page state: ' + actualVideoUrl);
+                        return actualVideoUrl;
+                    }
+                    if (noteData.video.media &&
+                        noteData.video.media.stream &&
+                        noteData.video.media.stream.h265 &&
+                        noteData.video.media.stream.h265[0] &&
+                        noteData.video.media.stream.h265[0].masterUrl) {
+
+                        var videoUrl = noteData.video.media.stream.h265[0].masterUrl;
+                        console.log('✓ Extracted 720p video URL from page state: ' + videoUrl);
+                        return videoUrl;
+                    }
                 }
+
 
                 // Check for Live Photo videos in imageList (Live Photo posts)
                 // This is based on Python project's Image.get_image_link method
