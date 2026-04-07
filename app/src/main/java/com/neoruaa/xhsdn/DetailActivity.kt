@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
@@ -33,7 +34,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
-import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -424,16 +424,122 @@ private fun FilesPage(
                 }
             }
         } else {
-            // ===== 真·瀑布流区域（双列）=====
-            items(uiState.mediaItems) { item ->
-                MediaPreview(
-                    item = item,
-                    onClick = { onMediaClick(item) },
-                    onDelete = onDeleteMedia
+            item(span = StaggeredGridItemSpan.FullLine) {
+                MediaWaterfall(
+                    mediaItems = uiState.mediaItems,
+                    onMediaClick = onMediaClick,
+                    onDeleteMedia = onDeleteMedia
                 )
             }
         }
     }
+}
+
+@Composable
+private fun MediaWaterfall(
+    mediaItems: List<MediaItem>,
+    onMediaClick: (MediaItem) -> Unit,
+    onDeleteMedia: (MediaItem) -> Unit
+) {
+    val columns = rememberBalancedMediaColumns(mediaItems)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        MediaColumn(
+            items = columns.left,
+            modifier = Modifier.weight(1f),
+            onMediaClick = onMediaClick,
+            onDeleteMedia = onDeleteMedia
+        )
+        MediaColumn(
+            items = columns.right,
+            modifier = Modifier.weight(1f),
+            onMediaClick = onMediaClick,
+            onDeleteMedia = onDeleteMedia
+        )
+    }
+}
+
+@Composable
+private fun MediaColumn(
+    items: List<MediaItem>,
+    modifier: Modifier = Modifier,
+    onMediaClick: (MediaItem) -> Unit,
+    onDeleteMedia: (MediaItem) -> Unit
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        items.forEach { item ->
+            MediaPreview(
+                item = item,
+                onClick = { onMediaClick(item) },
+                onDelete = onDeleteMedia
+            )
+        }
+
+        if (items.isEmpty()) {
+            Spacer(modifier = Modifier.height(1.dp))
+        }
+    }
+}
+
+private data class MediaColumns(
+    val left: List<MediaItem>,
+    val right: List<MediaItem>
+)
+
+@Composable
+private fun rememberBalancedMediaColumns(mediaItems: List<MediaItem>): MediaColumns {
+    val state = produceState(initialValue = MediaColumns(mediaItems, emptyList()), mediaItems) {
+        value = withContext(Dispatchers.IO) {
+            distributeMediaItems(mediaItems)
+        }
+    }
+    return state.value
+}
+
+private fun distributeMediaItems(mediaItems: List<MediaItem>): MediaColumns {
+    var leftItems = mutableListOf<MediaItem>()
+    var rightItems = mutableListOf<MediaItem>()
+    var leftHeight = 0f
+    var rightHeight = 0f
+
+    mediaItems.forEach { item ->
+        val estimatedHeight = estimateMediaCardHeight(item)
+        if (leftHeight <= rightHeight) {
+            leftItems.add(item)
+            leftHeight += estimatedHeight
+        } else {
+            rightItems.add(item)
+            rightHeight += estimatedHeight
+        }
+
+        if (rightHeight > leftHeight) {
+            val oldLeftItems = leftItems
+            leftItems = rightItems
+            rightItems = oldLeftItems
+
+            val oldLeftHeight = leftHeight
+            leftHeight = rightHeight
+            rightHeight = oldLeftHeight
+        }
+    }
+
+    return MediaColumns(leftItems.toList(), rightItems.toList())
+}
+
+private fun estimateMediaCardHeight(item: MediaItem): Float {
+    val aspectRatio = readAspectRatio(item)
+    val previewHeightWeight = if (aspectRatio != null && aspectRatio > 0f) {
+        1f / aspectRatio.coerceIn(0.4f, 2.5f)
+    } else {
+        1.33f
+    }
+    return previewHeightWeight + 0.34f
 }
 
 
@@ -454,8 +560,7 @@ private fun MediaPreview(item: MediaItem, onClick: () -> Unit, onDelete: (MediaI
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(aspectRatio)
-                .background(Color.Black),
+                .aspectRatio(aspectRatio),
             contentAlignment = Alignment.Center
         ) {
             if (bitmap != null) {
@@ -468,7 +573,7 @@ private fun MediaPreview(item: MediaItem, onClick: () -> Unit, onDelete: (MediaI
                 PlaceholderMedia(type = item.type)
             }
 
-            if (overlayResId != null) {
+            if (bitmap != null && overlayResId != null) {
                 androidx.compose.foundation.Image(
                     painter = painterResource(id = overlayResId),
                     contentDescription = null,
@@ -568,8 +673,7 @@ private fun PlaceholderMedia(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.05f)),
+            .fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -632,36 +736,40 @@ private fun rememberThumbnail(item: MediaItem): ImageBitmap? {
 @Composable
 private fun rememberAspectRatio(item: MediaItem): Float? {
     return remember(item.path) {
-        runCatching {
-            when (item.type) {
-                MediaType.IMAGE -> {
-                    val options = android.graphics.BitmapFactory.Options().apply {
-                        inJustDecodeBounds = true
-                    }
-                    android.graphics.BitmapFactory.decodeFile(item.path, options)
-                    if (options.outWidth > 0 && options.outHeight > 0) {
-                        options.outWidth.toFloat() / options.outHeight.toFloat()
-                    } else {
-                        null
-                    }
-                }
-
-                MediaType.VIDEO -> {
-                    val retriever = android.media.MediaMetadataRetriever()
-                    try {
-                        retriever.setDataSource(item.path)
-                        val width = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull()
-                        val height = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull()
-                        if (width != null && height != null && height > 0f) width / height else null
-                    } finally {
-                        retriever.release()
-                    }
-                }
-
-                MediaType.OTHER -> null
-            }
-        }.getOrNull()
+        readAspectRatio(item)
     }
+}
+
+private fun readAspectRatio(item: MediaItem): Float? {
+    return runCatching {
+        when (item.type) {
+            MediaType.IMAGE -> {
+                val options = android.graphics.BitmapFactory.Options().apply {
+                    inJustDecodeBounds = true
+                }
+                android.graphics.BitmapFactory.decodeFile(item.path, options)
+                if (options.outWidth > 0 && options.outHeight > 0) {
+                    options.outWidth.toFloat() / options.outHeight.toFloat()
+                } else {
+                    null
+                }
+            }
+
+            MediaType.VIDEO -> {
+                val retriever = android.media.MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(item.path)
+                    val width = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull()
+                    val height = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull()
+                    if (width != null && height != null && height > 0f) width / height else null
+                } finally {
+                    retriever.release()
+                }
+            }
+
+            MediaType.OTHER -> null
+        }
+    }.getOrNull()
 }
 
 // 缓存用于缩略图
@@ -670,4 +778,3 @@ private val thumbnailCache = object : LinkedHashMap<String, ImageBitmap>(100, 0.
         return size > 100
     }
 }
-
