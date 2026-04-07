@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -442,6 +443,7 @@ private fun MediaPreview(item: MediaItem, onClick: () -> Unit, onDelete: (MediaI
     val bitmap = rememberThumbnail(item)
     val aspectRatio = rememberAspectRatio(item) ?: 0.75f
     val fileName = remember(item.path) { File(item.path).name }
+    val overlayResId = remember(item.path, item.type) { previewOverlayResId(item) }
 
     Column(
         modifier = Modifier
@@ -449,17 +451,30 @@ private fun MediaPreview(item: MediaItem, onClick: () -> Unit, onDelete: (MediaI
             .background(MiuixTheme.colorScheme.surfaceVariant)
             .clickable { onClick() }
     ) {
-        if (bitmap != null) {
-            androidx.compose.foundation.Image(
-                bitmap = bitmap,
-                contentDescription = item.path,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(aspectRatio)
-                    .background(Color.Black)
-            )
-        } else {
-            PlaceholderMedia(type = item.type, aspectRatio = aspectRatio)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(aspectRatio)
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            if (bitmap != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = bitmap,
+                    contentDescription = item.path,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                PlaceholderMedia(type = item.type)
+            }
+
+            if (overlayResId != null) {
+                androidx.compose.foundation.Image(
+                    painter = painterResource(id = overlayResId),
+                    contentDescription = null,
+                    modifier = Modifier.size(60.dp)
+                )
+            }
         }
         Row(
             modifier = Modifier
@@ -548,13 +563,12 @@ private fun MediaPreview(item: MediaItem, onClick: () -> Unit, onDelete: (MediaI
 
 @Composable
 private fun PlaceholderMedia(
-    type: MediaType,
-    aspectRatio: Float
+    type: MediaType
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(aspectRatio)
+            .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.05f)),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -566,6 +580,22 @@ private fun PlaceholderMedia(
             tint = Color.Gray
         )
     }
+}
+
+private fun previewOverlayResId(item: MediaItem): Int? {
+    return when {
+        item.type == MediaType.VIDEO -> R.drawable.play_button_overlay
+        isLivePhotoItem(item) -> R.drawable.live_photo_overlay
+        else -> null
+    }
+}
+
+private fun isLivePhotoItem(item: MediaItem): Boolean {
+    if (item.type != MediaType.IMAGE) {
+        return false
+    }
+    val fileName = File(item.path).name.lowercase()
+    return "_live." in fileName || "_live_" in fileName
 }
 
 @Composable
@@ -640,6 +670,4 @@ private val thumbnailCache = object : LinkedHashMap<String, ImageBitmap>(100, 0.
         return size > 100
     }
 }
-
-
 
