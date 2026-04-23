@@ -134,6 +134,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun isTerminalDownloadError(status: String): Boolean {
+        val normalized = status.lowercase(Locale.ROOT)
+        return normalized.contains("failed to download after") ||
+            normalized.contains("exception downloading") ||
+            normalized.contains("download failed") ||
+            normalized.contains("io error downloading file") ||
+            normalized.contains("security exception while downloading file") ||
+            normalized.contains("non-media response received") ||
+            normalized.contains("both image and video failed to download separately")
+    }
+
     fun updateUrl(value: String) {
         _uiState.update { it.copy(urlInput = value, showWebCrawl = false) }
     }
@@ -355,6 +366,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     override fun onDownloadError(status: String, originalUrl: String) {
                         appendStatus("错误：$status ($originalUrl)")
+                        if (isTerminalDownloadError(status)) {
+                            taskFailedFiles++
+                            taskCurrentFileProgress = 0f
+                            TaskManager.updateProgress(
+                                myTaskId,
+                                taskCompletedFiles,
+                                taskFailedFiles,
+                                taskCurrentFileProgress
+                            )
+                        }
                         // 解析失败时给出网页爬取入口
                         if (status.contains("No media URLs found", true)
                             || status.contains("Failed to fetch post details", true)
@@ -413,24 +434,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) {
                     // Only proceed if this coroutine is still active (not cancelled)
                     if (isActive) {
-                        appendStatus("✅ 下载完成")
                         _uiState.update { it.copy(isDownloading = false) }
 
-                         if (!success) {
-                        // If failed, but it was due to waiting for user code, do NOT mark as failed
-                        // Check if current task status is WAITING_FOR_USER (race condition check)
-                         // Actually, we handle this in the catch block better.
-                         // Only mark failed if we are NOT waiting for user.
-                         // But here success=false means downloader returned false.
-                         // If cancelled, we go to catch block.
-
-                         // If downloader simply returned false (rare if cancelled?), complete as failed.
-                         TaskManager.completeTask(myTaskId, false, "下载过程出错")
-                         appendStatus("下载失败")
-                    } else {
-                         TaskManager.completeTask(myTaskId, true)
-                         appendStatus("下载完成")
-                    }
+                        if (!success || taskCompletedFiles == 0 || taskFailedFiles > 0) {
+                            val errorMessage = if (taskCompletedFiles > 0 && taskFailedFiles > 0) {
+                                "部分文件下载失败"
+                            } else {
+                                "下载过程出错"
+                            }
+                            TaskManager.completeTask(myTaskId, false, errorMessage)
+                            appendStatus(if (taskFailedFiles > 0) "部分文件下载失败" else "下载失败")
+                        } else {
+                            TaskManager.completeTask(myTaskId, true)
+                            appendStatus("✅ 下载完成")
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -558,7 +575,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     override fun onDownloadError(status: String, originalUrl: String) {
                         appendStatus("错误：$status ($originalUrl)")
-                        taskFailedFiles++
+                        if (isTerminalDownloadError(status)) {
+                            taskFailedFiles++
+                            taskCurrentFileProgress = 0f
+                            TaskManager.updateProgress(
+                                myTaskId,
+                                taskCompletedFiles,
+                                taskFailedFiles,
+                                taskCurrentFileProgress
+                            )
+                        }
                     }
 
                     override fun onVideoDetected() {
@@ -572,12 +598,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             downloader.resetStopDownload()
 
             try {
-                downloader.downloadContent(targetUrl)
+                val success = downloader.downloadContent(targetUrl)
                 withContext(Dispatchers.Main) {
-                    if (taskCompletedFiles > 0 || taskFailedFiles == 0) {
+                    if (success && taskCompletedFiles > 0 && taskFailedFiles == 0) {
                         TaskManager.completeTask(myTaskId, true)
                     } else {
-                        TaskManager.completeTask(myTaskId, false, "下载过程出错")
+                        val errorMessage = if (taskCompletedFiles > 0 && taskFailedFiles > 0) {
+                            "部分文件下载失败"
+                        } else {
+                            "下载过程出错"
+                        }
+                        TaskManager.completeTask(myTaskId, false, errorMessage)
                     }
                 }
             } catch (e: CancellationException) {
@@ -703,6 +734,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         // Reset download tracking variables for web crawl
         resetDownloadTracking()
+        var webCrawlFailedFiles = 0
 
         _uiState.update {
             it.copy(
@@ -731,7 +763,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 taskId?.let { id ->
                                     TaskManager.addFilePath(id, filePath)
                                     // Update the completed files count in the task manager
-                                    TaskManager.updateProgress(id, downloadedCount, 0, taskCurrentFileProgress)
+                                    TaskManager.updateProgress(id, downloadedCount, webCrawlFailedFiles, taskCurrentFileProgress)
                                 }
                             }
                         }
@@ -805,7 +837,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 TaskManager.updateProgress(
                                     id,
                                     downloadedCount, // For web crawl, use downloadedCount as completed files
-                                    0, // For web crawl, failed files are handled differently
+                                    webCrawlFailedFiles,
                                     taskCurrentFileProgress
                                 )
                                 lastTaskProgressUpdateTime = currentTime
@@ -822,6 +854,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                     override fun onDownloadError(status: String, originalUrl: String) {
                         appendStatus("错误：$status ($originalUrl)")
+                        if (isTerminalDownloadError(status)) {
+                            webCrawlFailedFiles++
+                            taskCurrentFileProgress = 0f
+                            taskId?.let { id ->
+                                TaskManager.updateProgress(id, downloadedCount, webCrawlFailedFiles, taskCurrentFileProgress)
+                            }
+                        }
                     }
 
                     override fun onVideoDetected() {
@@ -855,15 +894,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val extension = determineFileExtension(transformed)
                     val fileName = "${postId}_${index + 1}.$extension"
                     appendStatus("准备下载文件: $fileName, URL: $transformed")
-                    downloader.downloadFile(transformed, fileName)
-                    appendStatus("完成下载第 ${index + 1} 个文件")
+                    val success = downloader.downloadFile(rawUrl, fileName)
+                    appendStatus(
+                        if (success) "完成下载第 ${index + 1} 个文件"
+                        else "第 ${index + 1} 个文件下载失败"
+                    )
                 }
                 withContext(Dispatchers.Main) {
                     updateProgress()
                     appendStatus("网页转存完成")
                     // Mark task as complete if taskId was provided
                     taskId?.let { id ->
-                        TaskManager.completeTask(id, true)
+                        if (downloadedCount > 0 && webCrawlFailedFiles == 0) {
+                            TaskManager.completeTask(id, true)
+                        } else {
+                            val errorMessage = if (downloadedCount > 0 && webCrawlFailedFiles > 0) {
+                                "部分文件下载失败"
+                            } else {
+                                "网页转存出错"
+                            }
+                            TaskManager.completeTask(id, false, errorMessage)
+                        }
                     }
                 }
             } catch (e: Exception) {

@@ -15,6 +15,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -31,8 +32,11 @@ import okhttp3.Response;
 public class XHSDownloader {
     private static final String TAG = "XHSDownloader";
     private static final String USER_AGENT_XHS_ANDROID = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36 xiaohongshu";
+    private static final int MAX_DOWNLOAD_ATTEMPTS = 3;
+    private static final long DOWNLOAD_RETRY_BACKOFF_MS = 350L;
     private Context context;
     private OkHttpClient httpClient;
+    private FileDownloader fileDownloader;
     private List<String> downloadUrls;
     
     // Regex patterns for URL matching
@@ -73,7 +77,7 @@ public class XHSDownloader {
 
     public XHSDownloader(Context context, DownloadCallback callback) {
         this.context = context;
-        this.httpClient = new OkHttpClient();
+        this.httpClient = FileDownloader.getSharedHttpClient();
         this.downloadUrls = new ArrayList<>();
         // Wrap the original callback to track successful downloads
         if (callback != null) {
@@ -107,18 +111,16 @@ public class XHSDownloader {
         } else {
             this.downloadCallback = callback;
         }
+        this.fileDownloader = new FileDownloader(this.context, this.downloadCallback);
     }
     
     public boolean downloadFile(String url, String filename) {
-        // Use the FileDownloader class to handle the actual download
-        FileDownloader downloader = new FileDownloader(this.context, this.downloadCallback);
-        return downloader.downloadFile(url, filename);
+        String timestamp = new java.text.SimpleDateFormat("yyMMdd", java.util.Locale.getDefault()).format(new java.util.Date());
+        return downloadFileWithRetries(url, filename, timestamp);
     }
 
     public boolean downloadFile(String url, String filename, String timestamp) {
-        // Use the FileDownloader class to handle the actual download with timestamp
-        FileDownloader downloader = new FileDownloader(this.context, this.downloadCallback);
-        return downloader.downloadFile(url, filename, timestamp);
+        return downloadFileWithRetries(url, filename, timestamp);
     }
     
     public boolean downloadContent(String inputUrl) {
@@ -285,17 +287,6 @@ public class XHSDownloader {
                                             String mediaUrl = allMediaUrls.get(i);
                                             if (!success) {
                                                 Log.e(TAG, "Failed to download: " + mediaUrl);
-                                                // Notify the callback about the download error with the original URL
-                                                if (downloadCallback != null) {
-                                                    // Look up the original URL in the mapping
-                                                    String originalUrl = urlMapping.get(mediaUrl);
-                                                    if (originalUrl != null) {
-                                                        downloadCallback.onDownloadError("Failed to download: " + mediaUrl, originalUrl);
-                                                    } else {
-                                                        // If no mapping exists, use the URL as is
-                                                        downloadCallback.onDownloadError("Failed to download: " + mediaUrl, mediaUrl);
-                                                    }
-                                                }
                                                 postHasErrors = true;
                                                 hasErrors = true;
                                             } else {
@@ -339,17 +330,6 @@ public class XHSDownloader {
                                         boolean success = downloadFile(mediaUrl, fileNameWithExtension, sessionTimestamp);
                                         if (!success) {
                                             Log.e(TAG, "Failed to download: " + mediaUrl);
-                                            // Notify the callback about the download error with the original URL
-                                            if (downloadCallback != null) {
-                                                // Look up the original URL in the mapping
-                                                String originalUrl = urlMapping.get(mediaUrl);
-                                                if (originalUrl != null) {
-                                                    downloadCallback.onDownloadError("Failed to download: " + mediaUrl, originalUrl);
-                                                } else {
-                                                    // If no mapping exists, use the URL as is
-                                                    downloadCallback.onDownloadError("Failed to download: " + mediaUrl, mediaUrl);
-                                                }
-                                            }
                                             postHasErrors = true;
                                             hasErrors = true;
                                         } else {
@@ -424,6 +404,97 @@ public class XHSDownloader {
             urlMapping.clear();
             return false;
         }
+    }
+
+    private boolean downloadFileWithRetries(String mediaUrl, String filename, String timestamp) {
+        String originalUrl = urlMapping.get(mediaUrl);
+        if (TextUtils.isEmpty(originalUrl)) {
+            originalUrl = mediaUrl;
+        }
+
+        List<String> candidateUrls = buildDownloadCandidateUrls(mediaUrl, originalUrl);
+
+        for (String candidateUrl : candidateUrls) {
+            for (int attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
+                try {
+                    checkForStop();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+
+                boolean success = fileDownloader.downloadFile(candidateUrl, filename, timestamp, false);
+                if (success) {
+                    if (!candidateUrl.equals(mediaUrl)) {
+                        Log.d(TAG, "Download succeeded via fallback URL: " + candidateUrl);
+                    }
+                    return true;
+                }
+
+                Log.w(TAG, "Download attempt " + attempt + "/" + MAX_DOWNLOAD_ATTEMPTS + " failed for " + candidateUrl);
+                if (attempt < MAX_DOWNLOAD_ATTEMPTS) {
+                    try {
+                        Thread.sleep(DOWNLOAD_RETRY_BACKOFF_MS * attempt);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return false;
+                    }
+                }
+            }
+        }
+
+        if (downloadCallback != null) {
+            downloadCallback.onDownloadError(
+                    "Failed to download after " + (candidateUrls.size() * MAX_DOWNLOAD_ATTEMPTS) + " attempts",
+                    originalUrl
+            );
+        }
+        return false;
+    }
+
+    private List<String> buildDownloadCandidateUrls(String mediaUrl, String originalUrl) {
+        Set<String> candidateUrls = new LinkedHashSet<>();
+        String transformedMediaUrl = transformXhsCdnUrl(mediaUrl);
+        if (isLikelyMediaDownloadUrl(transformedMediaUrl) && !transformedMediaUrl.equals(mediaUrl)) {
+            addDownloadCandidate(candidateUrls, transformedMediaUrl);
+        }
+        if (isLikelyMediaDownloadUrl(mediaUrl)) {
+            addDownloadCandidate(candidateUrls, mediaUrl);
+        }
+        if (isLikelyMediaDownloadUrl(originalUrl)) {
+            addDownloadCandidate(candidateUrls, originalUrl);
+            String transformedOriginalUrl = transformXhsCdnUrl(originalUrl);
+            if (isLikelyMediaDownloadUrl(transformedOriginalUrl)) {
+                addDownloadCandidate(candidateUrls, transformedOriginalUrl);
+            }
+        }
+        return new ArrayList<>(candidateUrls);
+    }
+
+    private void addDownloadCandidate(Set<String> candidateUrls, String candidateUrl) {
+        if (!TextUtils.isEmpty(candidateUrl)) {
+            candidateUrls.add(candidateUrl);
+        }
+    }
+
+    private boolean isLikelyMediaDownloadUrl(String url) {
+        if (TextUtils.isEmpty(url)) {
+            return false;
+        }
+
+        String normalized = url.toLowerCase(Locale.ROOT);
+        return normalized.contains("xhscdn.com")
+                || normalized.contains("ci.xiaohongshu.com")
+                || normalized.contains(".jpg")
+                || normalized.contains(".jpeg")
+                || normalized.contains(".png")
+                || normalized.contains(".webp")
+                || normalized.contains(".gif")
+                || normalized.contains(".mp4")
+                || normalized.contains(".mov")
+                || normalized.contains("imageview2")
+                || normalized.contains("sns-video")
+                || normalized.contains("/spectrum/");
     }
     
     /**
@@ -1977,8 +2048,7 @@ public class XHSDownloader {
                     if (downloadCallback != null) {
                         String fallbackMessage = "Live photo creation failed for post " + postId + ", index " + livePhotoIndex +
                             ". Falling back to downloading separate image and video files.";
-                        downloadCallback.onDownloadError(fallbackMessage,
-                            "Live photo creation for " + postId + " (item " + livePhotoIndex + ")");
+                        downloadCallback.onDownloadProgress(fallbackMessage);
                     }
 
                     // Only download separately if the downloadFile calls were successful
@@ -1988,29 +2058,8 @@ public class XHSDownloader {
                     Log.d(TAG, "Fallback download - Image: " + (imageDownloadedFallback ? "Success" : "Failed") +
                            ", Video: " + (videoDownloadedFallback ? "Success" : "Failed"));
 
-                    // Notify the callback if the separate downloads were successful
-                    // Only notify once per live photo pair that couldn't be merged
                     boolean anySeparateFilesDownloaded = imageDownloadedFallback || videoDownloadedFallback;
-                    if (downloadCallback != null && anySeparateFilesDownloaded) {
-                        if (imageDownloadedFallback) {
-                            File separateImageFile = new File(
-                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES),
-                                "xhs_" + imageFileName
-                            );
-                            if (separateImageFile.exists()) {
-                                downloadCallback.onFileDownloaded(separateImageFile.getAbsolutePath());
-                            }
-                        }
-                        if (videoDownloadedFallback) {
-                            File separateVideoFile = new File(
-                                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_PICTURES),
-                                "xhs_" + videoFileName
-                            );
-                            if (separateVideoFile.exists()) {
-                                downloadCallback.onFileDownloaded(separateVideoFile.getAbsolutePath());
-                            }
-                        }
-                    } else if (downloadCallback != null && !anySeparateFilesDownloaded) {
+                    if (downloadCallback != null && !anySeparateFilesDownloaded) {
                         // If neither separate file downloaded successfully, notify about the failure
                         downloadCallback.onDownloadError(
                             "Both image and video failed to download separately after live photo creation failure",

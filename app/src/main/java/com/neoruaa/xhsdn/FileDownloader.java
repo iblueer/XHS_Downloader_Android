@@ -4,7 +4,6 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
@@ -21,9 +20,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Pattern;
 
 import okhttp3.ConnectionPool;
+import okhttp3.Dispatcher;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
 import okhttp3.Request;
@@ -32,26 +31,42 @@ import okhttp3.ResponseBody;
 
 public class FileDownloader {
     private static final String TAG = "FileDownloader";
+    private static final OkHttpClient SHARED_HTTP_CLIENT = createSharedHttpClient();
     private OkHttpClient httpClient;
     private Context context;
     private DownloadCallback callback;
+
+    private static OkHttpClient createSharedHttpClient() {
+        Dispatcher dispatcher = new Dispatcher();
+        dispatcher.setMaxRequests(12);
+        dispatcher.setMaxRequestsPerHost(8);
+
+        return new OkHttpClient.Builder()
+                .connectTimeout(20, TimeUnit.SECONDS)
+                .readTimeout(45, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .connectionPool(new ConnectionPool(12, 10, TimeUnit.MINUTES))
+                .dispatcher(dispatcher)
+                .protocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1))
+                .build();
+    }
+
+    public static OkHttpClient getSharedHttpClient() {
+        return SHARED_HTTP_CLIENT;
+    }
     
     public FileDownloader(Context context) {
-        this.context = context;
-        this.httpClient = new OkHttpClient();
+        this.context = context.getApplicationContext();
+        this.httpClient = SHARED_HTTP_CLIENT;
         this.callback = null;
     }
     
     public FileDownloader(Context context, DownloadCallback callback) {
-        this.context = context;
-        // Configure OkHttpClient with performance optimizations
-        this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)  // 30-second connection timeout
-                .readTimeout(60, TimeUnit.SECONDS)     // 60-second read timeout
-                .writeTimeout(30, TimeUnit.SECONDS)    // 30-second write timeout
-                .connectionPool(new ConnectionPool(10, 5, TimeUnit.MINUTES))  // Connection pooling
-                .protocols(Arrays.asList(Protocol.HTTP_2, Protocol.HTTP_1_1)) // Enable HTTP/2
-                .build();
+        this.context = context.getApplicationContext();
+        this.httpClient = SHARED_HTTP_CLIENT;
         this.callback = callback;
     }
     
@@ -62,9 +77,12 @@ public class FileDownloader {
     }
 
     public boolean downloadFile(String url, String fileName, String timestamp) {
+        return downloadFile(url, fileName, timestamp, true);
+    }
+
+    public boolean downloadFile(String url, String fileName, String timestamp, boolean notifyErrors) {
         try {
             Log.d(TAG, "on downloadFile: " + fileName);
-            // Create the request
             Request request = new Request.Builder()
                     .url(url)
                     .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
@@ -72,89 +90,97 @@ public class FileDownloader {
                     .addHeader("Referer", "https://www.xiaohongshu.com/")
                     .build();
 
-            // Execute the request
-            Response response = httpClient.newCall(request).execute();
+            try (Response response = httpClient.newCall(request).execute()) {
+                ResponseBody responseBody = response.body();
 
-            if (response.isSuccessful() && response.body() != null) {
-                // 优先从响应中获取文件扩展名 (Content-Type header)
-                String fileExtension = getFileExtension(response, url);
-
-                // 从原始文件名中提取基础名称（去掉扩展名）
-                String baseFileName = fileName;
-                int lastDotIndex = fileName.lastIndexOf('.');
-                if (lastDotIndex > 0 && lastDotIndex < fileName.length() - 1) {
-                    baseFileName = fileName.substring(0, lastDotIndex);
-                    Log.d(TAG, "Original filename has extension: " + fileName.substring(lastDotIndex + 1).toLowerCase() + 
-                          ", but using Content-Type based extension: " + fileExtension);
-                }
-
-                String fullFileName = "xhs_" + baseFileName + "." + fileExtension;
-
-                File destinationFile = null;
-
-                // For Android 10+ use MediaStore to ensure gallery visibility
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    destinationFile = saveToMediaStore(fullFileName, response.body(), fileExtension);
-                }
-
-                // If MediaStore save failed or we're on older Android, fall back to file-based save
-                if (destinationFile == null) {
-                    destinationFile = saveToFileSystem(url, fullFileName, response.body());
-                }
-
-                if (destinationFile != null && destinationFile.exists()) {
-                    Log.d(TAG, "Downloaded file: " + destinationFile.getAbsolutePath());
-                    Log.d(TAG, "Total bytes: " + (response.body() != null ? response.body().contentLength() : 0));
-                    Log.d(TAG, "File exists: " + destinationFile.exists());
-                    Log.d(TAG, "File size: " + destinationFile.length());
-
-                    // For files that aren't already in MediaStore (like those saved to app's private directory),
-                    // we still need to notify MediaStore
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || isFileInPrivateDirectory(destinationFile)) {
-                        notifyMediaStore(destinationFile);
+                if (response.isSuccessful() && responseBody != null) {
+                    String contentType = response.header("Content-Type", "");
+                    if (isNonMediaContentType(contentType)) {
+                        Log.e(TAG, "Rejecting non-media response. Content-Type: " + contentType + ", url: " + url);
+                        if (notifyErrors && callback != null) {
+                            callback.onDownloadError("Download failed. Non-media response received", url);
+                        }
+                        return false;
                     }
 
-                    // 通知回调下载完成
-                    if (callback != null) {
-                        callback.onFileDownloaded(destinationFile.getAbsolutePath());
+                    String fileExtension = getFileExtension(response, url);
+
+                    String baseFileName = fileName;
+                    int lastDotIndex = fileName.lastIndexOf('.');
+                    if (lastDotIndex > 0 && lastDotIndex < fileName.length() - 1) {
+                        baseFileName = fileName.substring(0, lastDotIndex);
+                        Log.d(TAG, "Original filename has extension: " + fileName.substring(lastDotIndex + 1).toLowerCase() +
+                                ", but using Content-Type based extension: " + fileExtension);
                     }
 
-                    if (response.body() != null) {
-                        response.body().close();
+                    String fullFileName = "xhs_" + baseFileName + "." + fileExtension;
+                    File destinationFile = null;
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        destinationFile = saveToMediaStore(fullFileName, responseBody, fileExtension);
                     }
 
-                    return true;
-                }
-            } else {
-                Log.e(TAG, "Download failed. Response code: " + response.code());
-                if (response.body() != null) {
-                    response.body().close();
-                }
+                    if (destinationFile == null) {
+                        destinationFile = saveToFileSystem(url, fullFileName, responseBody);
+                    }
 
-                // Notify the callback about the download error with the original URL
-                if (callback != null) {
-                    callback.onDownloadError("Download failed. Response code: " + response.code(), url);
+                    if (destinationFile != null && destinationFile.exists()) {
+                        Log.d(TAG, "Downloaded file: " + destinationFile.getAbsolutePath());
+                        Log.d(TAG, "Total bytes: " + responseBody.contentLength());
+                        Log.d(TAG, "File exists: " + destinationFile.exists());
+                        Log.d(TAG, "File size: " + destinationFile.length());
+
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || isFileInPrivateDirectory(destinationFile)) {
+                            notifyMediaStore(destinationFile);
+                        }
+
+                        if (callback != null) {
+                            callback.onFileDownloaded(destinationFile.getAbsolutePath());
+                        }
+
+                        return true;
+                    }
+                } else {
+                    Log.e(TAG, "Download failed. Response code: " + response.code());
+                    if (notifyErrors && callback != null) {
+                        callback.onDownloadError("Download failed. Response code: " + response.code(), url);
+                    }
                 }
             }
         } catch (IOException e) {
             Log.e(TAG, "Error downloading file: " + e.getMessage());
             e.printStackTrace();
 
-            // Notify the callback about the download error with the original URL
-            if (callback != null) {
+            if (notifyErrors && callback != null) {
                 callback.onDownloadError("IO Error downloading file: " + e.getMessage(), url);
             }
         } catch (SecurityException e) {
             Log.e(TAG, "Security exception while downloading file: " + e.getMessage());
             e.printStackTrace();
 
-            // Notify the callback about the download error with the original URL
-            if (callback != null) {
+            if (notifyErrors && callback != null) {
                 callback.onDownloadError("Security exception while downloading file: " + e.getMessage(), url);
             }
         }
 
         return false;
+    }
+
+    private boolean isNonMediaContentType(String contentType) {
+        if (contentType == null || contentType.isEmpty()) {
+            return false;
+        }
+
+        String normalized = contentType.toLowerCase();
+        if (normalized.contains("image/") || normalized.contains("video/") || normalized.contains("application/octet-stream")) {
+            return false;
+        }
+
+        return normalized.contains("text/html")
+                || normalized.contains("text/plain")
+                || normalized.contains("application/json")
+                || normalized.contains("application/xml")
+                || normalized.contains("text/xml");
     }
     
     /**
@@ -188,6 +214,7 @@ public class FileDownloader {
             values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
             values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
             values.put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath);
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
             
             Uri uri = contentResolver.insert(collectionUri, values);
             
@@ -220,9 +247,22 @@ public class FileDownloader {
                         
                         inputStream.close();
                         outputStream.close();
-                        
-                        // File is now in MediaStore, find the actual file path
-                        return getFileFromUri(uri);
+
+                        ContentValues finalizeValues = new ContentValues();
+                        finalizeValues.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                        contentResolver.update(uri, finalizeValues, null, null);
+
+                        File mediaStoreFile = buildMediaStoreFile(relativePath, fileName);
+                        if (mediaStoreFile.exists()) {
+                            return mediaStoreFile;
+                        }
+
+                        File fileFromUri = getFileFromUri(uri);
+                        if (fileFromUri != null && fileFromUri.exists()) {
+                            return fileFromUri;
+                        }
+
+                        return mediaStoreFile;
                     }
                 } catch (IOException e) {
                     Log.e(TAG, "Error writing to MediaStore URI: " + e.getMessage());
@@ -425,6 +465,11 @@ public class FileDownloader {
         }
         
         return null;
+    }
+
+    private File buildMediaStoreFile(String relativePath, String fileName) {
+        File externalStorageRoot = Environment.getExternalStorageDirectory();
+        return new File(externalStorageRoot, relativePath + File.separator + fileName);
     }
     
     /**

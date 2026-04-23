@@ -402,8 +402,7 @@ private fun SettingsScreen(
                             onValueChange = onTemplateChange,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                                .clip(ContinuousRoundedRectangle(14.dp)),
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
                             label = stringResource(R.string.naming_template),
                             enabled = uiState.useCustomNaming,
                             singleLine = false,

@@ -27,6 +27,7 @@ import kotlinx.coroutines.Job
 
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CancellationException
+import java.util.Locale
 
 object BackgroundDownloadManager {
     private const val TAG = "BackgroundDownload"
@@ -37,6 +38,17 @@ object BackgroundDownloadManager {
     private val taskCurrentFileProgress = ConcurrentHashMap<Long, Float>()
     private const val CHANNEL_ID = "xhs_download_channel_v2"
     private const val BASE_NOTIFICATION_ID = 1000
+
+    private fun isTerminalDownloadError(status: String): Boolean {
+        val normalized = status.lowercase(Locale.ROOT)
+        return normalized.contains("failed to download after") ||
+            normalized.contains("exception downloading") ||
+            normalized.contains("download failed") ||
+            normalized.contains("io error downloading file") ||
+            normalized.contains("security exception while downloading file") ||
+            normalized.contains("non-media response received") ||
+            normalized.contains("both image and video failed to download separately")
+    }
 
     fun startDownload(context: Context, url: String, title: String? = null) {
         Log.d(TAG, "startDownload: $url, title: $title")
@@ -116,10 +128,12 @@ object BackgroundDownloadManager {
                     }
 
                     override fun onDownloadError(status: String, originalUrl: String) {
-                        // Individual file error? 
-                         // Not explicitly counted in current MainViewModel logic as "failed file" usually
-                         // unless we track total vs completed. 
-                         // For simplicity, we just log it.
+                        if (isTerminalDownloadError(status)) {
+                            val failed = failedFiles.incrementAndGet()
+                            taskCurrentFileProgress[taskId] = 0f
+                            TaskManager.updateProgress(taskId, completedFiles.get(), failed, 0f)
+                        }
+                        Log.w(TAG, "Download error for task $taskId: $status ($originalUrl)")
                     }
 
                     override fun onDownloadProgress(status: String) {}
@@ -159,12 +173,16 @@ object BackgroundDownloadManager {
                 // 5. Complete
                 if (success) {
                     val completed = completedFiles.get()
-                    // If mediaCount was 0 (unknown), use completed as total
-                    val finalTotal = if (mediaCount == 0) completed else mediaCount
+                    val failed = failedFiles.get()
                     
-                    if (completed > 0) {
+                    if (completed > 0 && failed == 0) {
                         TaskManager.completeTask(taskId, true)
                         NotificationHelper.showDownloadNotification(appContext, taskId.toInt(), appContext.getString(R.string.download_completed_notification_title), appContext.getString(R.string.download_completed_files_count, completed), false)
+                    } else if (completed > 0) {
+                        val partialMessage = appContext.getString(R.string.download_completed_files_count, completed) + " " +
+                            appContext.getString(R.string.failed_files_format, failed)
+                        TaskManager.completeTask(taskId, false, "部分文件下载失败")
+                        NotificationHelper.showDownloadNotification(appContext, taskId.toInt(), appContext.getString(R.string.download_failed_notification_title), partialMessage, false)
                     } else {
                         TaskManager.completeTask(taskId, false, appContext.getString(R.string.download_failed_no_files))
                         NotificationHelper.showDownloadNotification(appContext, taskId.toInt(), appContext.getString(R.string.download_failed_notification_title), appContext.getString(R.string.download_failed_no_files), false)
