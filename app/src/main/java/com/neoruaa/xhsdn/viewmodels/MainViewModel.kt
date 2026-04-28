@@ -198,45 +198,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        // 在协程外部立即创建任务并设置currentTaskId，以便外部可以立即访问
-        val initialTaskId = if (currentTaskId > 0) {
-            // If we already have a task ID (e.g., from copyDescription), update the existing task
-            val existingTask = TaskManager.getTaskById(currentTaskId)
-            if (existingTask != null) {
-                // Update the existing task with new info
-                TaskManager.updateTask(currentTaskId) { task ->
-                    task.copy(
-                        noteUrl = targetUrl,
-                        noteTitle = task.noteTitle ?: extractTitleFromUrl(targetUrl), // Use existing title or extract from URL
-                        noteType = NoteType.IMAGE,
-                        totalFiles = 1, // We'll update this later after getting the count
-                        status = TaskStatus.QUEUED
-                    )
-                }
-                TaskManager.startTask(currentTaskId)
-                currentTaskId
-            } else {
-                // If somehow the task doesn't exist, create a new one
-                val newTaskId = TaskManager.createTask(
-                    noteUrl = targetUrl,
-                    noteTitle = extractTitleFromUrl(targetUrl),
-                    noteType = NoteType.IMAGE,
-                    totalFiles = 1 // We'll update this later after getting the count
-                )
-                TaskManager.startTask(newTaskId)
-                newTaskId
-            }
-        } else {
-            // Create a new task if no currentTaskId exists
-            val newTaskId = TaskManager.createTask(
-                noteUrl = targetUrl,
-                noteTitle = extractTitleFromUrl(targetUrl),
-                noteType = NoteType.IMAGE,
-                totalFiles = 1 // We'll update this later after getting the count
-            )
-            TaskManager.startTask(newTaskId)
-            newTaskId
-        }
+        // 在协程外部立即创建新任务并设置currentTaskId，以便外部可以立即访问
+        val initialTaskId = TaskManager.createTask(
+            noteUrl = targetUrl,
+            noteTitle = extractTitleFromUrl(targetUrl),
+            noteType = NoteType.IMAGE,
+            totalFiles = 1 // We'll update this later after getting the count
+        )
+        TaskManager.startTask(initialTaskId)
 
         currentTaskId = initialTaskId
         // 重置任务跟踪计数器
