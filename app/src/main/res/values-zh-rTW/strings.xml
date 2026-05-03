@@ -79,6 +79,8 @@
     <string name="create_live_photos_desc">關閉後 Live Photo 將作為圖片+影片分別下載</string>
     <string name="debug_notifications">調試通知</string>
     <string name="debug_notifications_desc">顯示詳細的下載調試資訊</string>
+    <string name="keep_screen_on">保持螢幕常亮</string>
+    <string name="keep_screen_on_desc">App 在前台時防止手機自動鎖定螢幕</string>
 
     <!-- Clipboard option strings -->
     <string name="show_clipboard_bubble">顯示剪貼簿氣泡</string>

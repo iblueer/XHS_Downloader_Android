@@ -79,6 +79,8 @@
     <string name="create_live_photos_desc">Live Photos will be saved as image+video separately when disabled</string>
     <string name="debug_notifications">Debug Notifications</string>
     <string name="debug_notifications_desc">Show detailed download debugging information</string>
+    <string name="keep_screen_on">Keep Screen On</string>
+    <string name="keep_screen_on_desc">Prevent the phone from auto-locking while the app is in the foreground</string>
 
     <!-- Clipboard option strings -->
     <string name="show_clipboard_bubble">Show Clipboard Bubble</string>

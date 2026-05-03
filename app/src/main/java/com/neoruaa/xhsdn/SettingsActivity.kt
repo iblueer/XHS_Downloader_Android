@@ -83,6 +83,7 @@ data class SettingsUiState(
     val template: TextFieldValue = TextFieldValue(NamingFormat.DEFAULT_TEMPLATE),
     val tokens: List<NamingFormat.TokenDefinition> = emptyList(),
     val debugNotificationEnabled: Boolean = false,
+    val keepScreenOn: Boolean = false,
     val showClipboardBubble: Boolean = true,
     val autoReadClipboard: Boolean = false,
     val manualInputLinks: Boolean = false
@@ -103,6 +104,7 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
             template = NamingFormat.DEFAULT_TEMPLATE
         }
         val debugNotificationEnabled = prefs.getBoolean("debug_notification_enabled", false)
+        val keepScreenOn = prefs.getBoolean("keep_screen_on", false)
         val showClipboardBubble = prefs.getBoolean("show_clipboard_bubble", true) // Default true
         val autoReadClipboard = prefs.getBoolean("auto_read_clipboard", false)
         val manualInputLinks = prefs.getBoolean("manual_input_links", false)
@@ -112,6 +114,7 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
             template = TextFieldValue(template),
             tokens = NamingFormat.getAvailableTokens(),
             debugNotificationEnabled = debugNotificationEnabled,
+            keepScreenOn = keepScreenOn,
             showClipboardBubble = showClipboardBubble,
             autoReadClipboard = autoReadClipboard,
             manualInputLinks = manualInputLinks
@@ -152,6 +155,12 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
         }
     }
 
+    fun onKeepScreenOnChange(enabled: Boolean) = updateState {
+        it.copy(keepScreenOn = enabled).also { newState ->
+            persist(newState)
+        }
+    }
+
     fun onShowClipboardBubbleChange(enabled: Boolean) = updateState {
         it.copy(showClipboardBubble = enabled).also { newState ->
             persist(newState)
@@ -177,6 +186,7 @@ class SettingsViewModel(private val prefs: SharedPreferences) : ViewModel() {
             .putBoolean("use_custom_naming_format", state.useCustomNaming)
             .putString("custom_naming_template", state.template.text.ifBlank { NamingFormat.DEFAULT_TEMPLATE })
             .putBoolean("debug_notification_enabled", state.debugNotificationEnabled)
+            .putBoolean("keep_screen_on", state.keepScreenOn)
             .putBoolean("show_clipboard_bubble", state.showClipboardBubble)
             .putBoolean("auto_read_clipboard", state.autoReadClipboard)
             .putBoolean("manual_input_links", state.manualInputLinks)
@@ -244,6 +254,7 @@ class SettingsActivity : ComponentActivity() {
                     onTemplateChange = viewModel::onTemplateChange,
                     onResetTemplate = viewModel::onResetTemplate,
                     onDebugNotificationChange = viewModel::onDebugNotificationChange,
+                    onKeepScreenOnChange = viewModel::onKeepScreenOnChange,
                     onShowClipboardBubbleChange = viewModel::onShowClipboardBubbleChange,
                     onAutoReadClipboardChange = viewModel::onAutoReadClipboardChange,
                     onManualInputLinksChange = viewModel::onManualInputLinksChange,
@@ -278,6 +289,7 @@ private fun SettingsScreen(
     onTemplateChange: (TextFieldValue) -> Unit,
     onResetTemplate: () -> Unit,
     onDebugNotificationChange: (Boolean) -> Unit,
+    onKeepScreenOnChange: (Boolean) -> Unit,
     onShowClipboardBubbleChange: (Boolean) -> Unit,
     onAutoReadClipboardChange: (Boolean) -> Unit,
     onManualInputLinksChange: (Boolean) -> Unit,
@@ -340,6 +352,13 @@ private fun SettingsScreen(
                         description = stringResource(R.string.debug_notifications_desc),
                         checked = uiState.debugNotificationEnabled,
                         onCheckedChange = onDebugNotificationChange
+                    )
+
+                    MiuixSwitchWidget(
+                        title = stringResource(R.string.keep_screen_on),
+                        description = stringResource(R.string.keep_screen_on_desc),
+                        checked = uiState.keepScreenOn,
+                        onCheckedChange = onKeepScreenOnChange
                     )
                 }
             }

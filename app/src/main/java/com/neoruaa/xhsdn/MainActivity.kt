@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.core.view.WindowCompat
 import androidx.activity.ComponentActivity
@@ -143,6 +144,12 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         com.neoruaa.xhsdn.data.TaskManager.init(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        // 防止自动锁屏
+        val prefs = getSharedPreferences("XHSDownloaderPrefs", MODE_PRIVATE)
+        if (prefs.getBoolean("keep_screen_on", false)) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
         setContent {
             val controller = ThemeController(ColorSchemeMode.System)
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -174,6 +181,12 @@ class MainActivity : ComponentActivity() {
                 val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
                     if (key == "manual_input_links") {
                         manualInputLinks = prefs.getBoolean("manual_input_links", false)
+                    } else if (key == "keep_screen_on") {
+                        if (prefs.getBoolean("keep_screen_on", false)) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        }
                     }
                 }
                 prefs.registerOnSharedPreferenceChangeListener(listener)
